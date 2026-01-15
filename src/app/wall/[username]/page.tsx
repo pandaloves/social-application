@@ -1,0 +1,410 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
+import {
+  Container,
+  Box,
+  Typography,
+  Paper,
+  Avatar,
+  Button,
+  TextField,
+  CircularProgress,
+  Alert,
+  AlertTitle,
+  Grid,
+  Divider,
+  Chip,
+  Tabs,
+  Tab,
+  IconButton,
+} from "@mui/material";
+import {
+  Person as PersonIcon,
+  Edit as EditIcon,
+  Add as AddIcon,
+  ArrowBack as ArrowBackIcon,
+} from "@mui/icons-material";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import api, { postService, userService } from "@/src/services/api";
+import PostCard from "@/src/components/Post/PostCard";
+import CreatePostDialog from "@/src/components/Post/CreatePostDialog";
+import { PostResponseDto } from "@/src/types";
+import { useAuth } from "@/src/contexts/AuthContext";
+import FriendsList from "@/src/components/Friends/FriendsList";
+
+export default function WallPage() {
+  const params = useParams();
+  const router = useRouter();
+  const username = params.username as string;
+  const { user: currentUser, isAuthenticated } = useAuth();
+  const queryClient = useQueryClient();
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [tabValue, setTabValue] = useState(0);
+
+  // Check if this is the current user's wall
+  const isOwnWall = currentUser?.username === username;
+
+  // Fetch user with posts
+  // Update your query function in WallPage.tsx
+  const {
+    data: userData,
+    isLoading: userLoading,
+    error: userError,
+    refetch: refetchUser,
+  } = useQuery({
+    queryKey: ["user", username],
+    queryFn: async () => {
+      console.log("Fetching user for username:", username);
+
+      try {
+        // First get user by username to get ID
+        const users = await userService.getUsers();
+        console.log("All users:", users);
+
+        const foundUser = users.find((u: any) => u.username === username);
+        console.log("Found user:", foundUser);
+
+        if (!foundUser) {
+          throw new Error(`User with username ${username} not found`);
+        }
+
+        console.log("Fetching user with posts for ID:", foundUser.id);
+        // Then get user with posts using the ID
+        const userWithPosts = await userService.getUserWithPosts(foundUser.id);
+        console.log("User with posts:", userWithPosts);
+
+        return userWithPosts;
+      } catch (error) {
+        console.error("Error in user query:", error);
+        throw error;
+      }
+    },
+    enabled: !!username && isAuthenticated,
+  });
+
+  // Create post mutation
+  const createPostMutation = useMutation({
+    mutationFn: (content: string) =>
+      postService.createPost({
+        content,
+        userId: currentUser?.id || 0,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", username] });
+      setCreateDialogOpen(false);
+    },
+  });
+
+  // Update post mutation
+  const updatePostMutation = useMutation({
+    mutationFn: ({ id, content }: { id: number; content: string }) =>
+      postService.updatePost(id, { content, userId: currentUser?.id || 0 }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", username] });
+    },
+  });
+
+  // Delete post mutation
+  const deletePostMutation = useMutation({
+    mutationFn: (id: number) => postService.deletePost(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", username] });
+    },
+  });
+
+  const handleCreatePost = (content: string) => {
+    createPostMutation.mutate(content);
+  };
+
+  const handleEditPost = (id: number, content: string) => {
+    updatePostMutation.mutate({ id, content });
+  };
+
+  const handleDeletePost = (id: number) => {
+    deletePostMutation.mutate(id);
+  };
+
+  const handleBackToFeed = () => {
+    router.push("/feed");
+  };
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.push("/login");
+    }
+  }, [isAuthenticated, router]);
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  if (userLoading) {
+    return (
+      <Container
+        maxWidth="lg"
+        sx={{ py: 4, display: "flex", justifyContent: "center" }}
+      >
+        <CircularProgress />
+      </Container>
+    );
+  }
+
+  if (userError || !userData) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Alert severity="error">
+          <AlertTitle>User Not Found</AlertTitle>
+          The user you're looking for doesn't exist or you don't have permission
+          to view this page.
+        </Alert>
+        <Button
+          startIcon={<ArrowBackIcon />}
+          onClick={handleBackToFeed}
+          sx={{ mt: 2 }}
+        >
+          Back to Feed
+        </Button>
+      </Container>
+    );
+  }
+
+  return (
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      {/* Back button */}
+      <Button
+        startIcon={<ArrowBackIcon />}
+        onClick={handleBackToFeed}
+        sx={{ mb: 3 }}
+      >
+        Back to Feed
+      </Button>
+
+      {/* User Profile Header */}
+      <Paper sx={{ p: 4, mb: 4, borderRadius: 2 }}>
+        <Grid container spacing={3} alignItems="center">
+          <Grid sx={{ xs: 12, md: 6 }}>
+            <Avatar
+              sx={{
+                width: 120,
+                height: 120,
+                bgcolor: "primary.main",
+                fontSize: "2.5rem",
+              }}
+            >
+              {userData.user.displayName?.charAt(0) || (
+                <PersonIcon sx={{ fontSize: 60 }} />
+              )}
+            </Avatar>
+          </Grid>
+          <Grid sx={{ xs: 12, md: 6 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1 }}>
+              <Typography variant="h3" component="h1">
+                {userData.user.displayName}
+              </Typography>
+              {isOwnWall && (
+                <Button
+                  startIcon={<EditIcon />}
+                  variant="outlined"
+                  size="small"
+                  onClick={() => {
+                    /* Open edit profile dialog */
+                  }}
+                >
+                  Edit Profile
+                </Button>
+              )}
+            </Box>
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              @{userData.user.username}
+            </Typography>
+
+            {userData.user.bio && (
+              <Typography paragraph sx={{ mt: 2, mb: 3 }}>
+                {userData.user.bio}
+              </Typography>
+            )}
+
+            <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+              <Chip
+                label={`${userData.posts?.length || 0} posts`}
+                variant="outlined"
+              />
+              <Chip label="0 friends" variant="outlined" />
+              <Chip label="Member" color="primary" variant="outlined" />
+            </Box>
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Tabs */}
+      <Paper sx={{ mb: 4, borderRadius: 2 }}>
+        <Tabs
+          value={tabValue}
+          onChange={(_, newValue) => setTabValue(newValue)}
+          variant="fullWidth"
+        >
+          <Tab label="Posts" />
+          <Tab label="About" />
+          <Tab label="Friends" />
+        </Tabs>
+      </Paper>
+
+      {/* Posts Tab */}
+      {tabValue === 0 && (
+        <>
+          {/* Create Post Section (only on own wall) */}
+          {isOwnWall && (
+            <Paper sx={{ p: 3, mb: 4, borderRadius: 2 }}>
+              <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
+                <Avatar
+                  sx={{
+                    width: 40,
+                    height: 40,
+                    mr: 2,
+                    bgcolor: "primary.main",
+                  }}
+                >
+                  {currentUser?.displayName?.charAt(0) || "U"}
+                </Avatar>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  onClick={() => setCreateDialogOpen(true)}
+                  sx={{ justifyContent: "flex-start", textAlign: "left" }}
+                >
+                  What's on your mind, {currentUser?.displayName}?
+                </Button>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+
+              <Box sx={{ display: "flex", justifyContent: "center", gap: 1 }}>
+                <Button startIcon={<AddIcon />} size="small">
+                  Photo/Video
+                </Button>
+                <Button startIcon={<PersonIcon />} size="small">
+                  Tag Friends
+                </Button>
+              </Box>
+            </Paper>
+          )}
+
+          <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
+            {isOwnWall ? "Your Posts" : "Posts"}
+            {userData.posts && userData.posts.length > 0 && (
+              <Typography
+                component="span"
+                color="text.secondary"
+                sx={{ ml: 1 }}
+              >
+                ({userData.posts.length})
+              </Typography>
+            )}
+          </Typography>
+
+          {/* Posts List */}
+          {userData.posts && userData.posts.length > 0 ? (
+            userData.posts.map((post: PostResponseDto) => (
+              <PostCard
+                key={post.id}
+                post={post}
+                onEdit={isOwnWall ? handleEditPost : undefined}
+                onDelete={isOwnWall ? handleDeletePost : undefined}
+                showActions={isOwnWall}
+              />
+            ))
+          ) : (
+            <Alert severity="info">
+              <AlertTitle>
+                {isOwnWall
+                  ? "You haven't created any posts yet"
+                  : "No posts yet"}
+              </AlertTitle>
+              {isOwnWall
+                ? "Create your first post to share with the community!"
+                : "This user hasn't created any posts yet."}
+            </Alert>
+          )}
+        </>
+      )}
+
+      {/* About Tab */}
+      {tabValue === 1 && (
+        <Paper sx={{ p: 4, borderRadius: 2 }}>
+          <Typography variant="h5" gutterBottom>
+            About {userData.user.displayName}
+          </Typography>
+
+          <Grid container spacing={3}>
+            <Grid sx={{ xs: 12, md: 6 }}>
+              <Box sx={{ mb: 3 }}>
+                <Typography
+                  variant="subtitle2"
+                  color="text.secondary"
+                  gutterBottom
+                >
+                  Bio
+                </Typography>
+                <Typography>
+                  {userData.user.bio || "No bio provided"}
+                </Typography>
+              </Box>
+            </Grid>
+
+            <Grid sx={{ xs: 12, md: 6 }}>
+              <Box sx={{ mb: 3 }}>
+                <Typography
+                  variant="subtitle2"
+                  color="text.secondary"
+                  gutterBottom
+                >
+                  Username
+                </Typography>
+                <Typography>@{userData.user.username}</Typography>
+              </Box>
+
+              <Box sx={{ mb: 3 }}>
+                <Typography
+                  variant="subtitle2"
+                  color="text.secondary"
+                  gutterBottom
+                >
+                  Member Since
+                </Typography>
+                <Typography>
+                  {new Date().toLocaleDateString()}{" "}
+                  {/* You might want to add registration date to your API */}
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+        </Paper>
+      )}
+
+      {/* Friends Tab */}
+      {tabValue === 2 && (
+        <Paper sx={{ p: 4, borderRadius: 2 }}>
+          <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
+            Friends
+          </Typography>
+
+          {/* Friends List */}
+          <FriendsList userId={userData.user.id} isOwnWall={isOwnWall} />
+        </Paper>
+      )}
+
+      {/* Create Post Dialog */}
+      {isOwnWall && (
+        <CreatePostDialog
+          open={createDialogOpen}
+          onClose={() => setCreateDialogOpen(false)}
+          onSubmit={handleCreatePost}
+          isLoading={createPostMutation.isPending}
+        />
+      )}
+    </Container>
+  );
+}

@@ -1,0 +1,115 @@
+'use client';
+
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { UserResponseDto } from '../types';
+import { authService, userService } from '../services/api';
+
+
+type AuthContextType = {
+  user: UserResponseDto | null;
+  isAuthenticated: boolean;
+  login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => void;
+  register: (userData: any) => Promise<{ success: boolean; error?: string }>;
+  isLoading: boolean;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+type AuthProviderProps = {
+  children: ReactNode;
+}
+
+export default function AuthProvider({ children } : AuthProviderProps) {
+  const [user, setUser] = useState<UserResponseDto | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    // Check for stored user on mount
+    if (typeof window !== 'undefined') {
+      const storedUser = localStorage.getItem('user');
+      const token = localStorage.getItem('token');
+      
+      if (storedUser && token) {
+        try {
+          setUser(JSON.parse(storedUser));
+        } catch (error) {
+          console.error('Error parsing stored user:', error);
+          localStorage.removeItem('user');
+          localStorage.removeItem('token');
+        }
+      }
+    }
+    setIsLoading(false);
+  }, []);
+
+  const login = async (username: string, password: string) => {
+    try {
+      const response = await authService.login({ username, password });
+      if (response.success) {
+        localStorage.setItem('token', response.token);
+        localStorage.setItem('refreshToken', response.refreshToken);
+        console.log('token', response.token);
+        console.log('refreshToken', response.refreshToken);
+        
+        // Fetch user by username to get full user data
+       const usersResponse = await userService.getUsers();
+        const foundUser = usersResponse.find((u: UserResponseDto) => u.username === username);
+        
+        if (foundUser) {
+          localStorage.setItem('user', JSON.stringify(foundUser));
+          setUser(foundUser);
+          return { success: true };
+        }
+      }
+      return { success: false, error: 'Invalid credentials' };
+    } catch (error: any) {
+      return { 
+        success: false, 
+        error: error.response?.data?.message || 'Login failed' 
+      };
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
+    setUser(null);
+  };
+
+  const register = async (userData: any) => {
+    try {
+      const response = await authService.register(userData);
+      return { success: true, data: response };
+    } catch (error: any) {
+      return { 
+        success: false, 
+        error: error.response?.data?.message || 'Registration failed' 
+      };
+    }
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        isAuthenticated: !!user,
+        login,
+        logout,
+        register,
+        isLoading,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+};
