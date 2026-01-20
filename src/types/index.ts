@@ -77,7 +77,11 @@ export type CommentResponseDto = {
   id: number;
   commentText: string;
   timestamp: string;
-  user: UserResponseDto;
+  user: {
+    id: number;
+    username: string;
+    displayName: string;
+  };
 }
 
 export type CommentRequestDto = {

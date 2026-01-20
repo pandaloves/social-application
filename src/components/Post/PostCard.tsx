@@ -28,8 +28,11 @@ import {
   Share as ShareIcon,
 } from "@mui/icons-material";
 import Link from "next/link";
-import { PostResponseDto } from "@/src/types";
+import { CommentResponseDto, PostResponseDto } from "@/src/types";
 import { useAuth } from "@/src/contexts/AuthContext";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { commentService } from "@/src/services/api";
+
 
 type PostCardProps = {
   post: PostResponseDto;
@@ -53,8 +56,9 @@ export default function PostCard({
   const [commentText, setCommentText] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const queryClient = useQueryClient();
 
-  const isOwnPost = user?.id === post.author.id;
+  const isOwnPost = user ? user.id === post.author.id : false;
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -94,12 +98,11 @@ export default function PostCard({
   };
 
   const handleComment = () => {
-    if (onComment && commentText.trim() !== "") {
-      onComment(post.id, commentText);
-      setCommentText("");
-      setShowCommentForm(false);
-    }
-  };
+  if (commentText.trim()) {
+    createCommentMutation.mutate(commentText);
+  }
+};
+
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -111,6 +114,30 @@ export default function PostCard({
       minute: "2-digit",
     });
   };
+
+const {
+  data: comments = [],
+  isLoading: commentsLoading,
+} = useQuery<CommentResponseDto[]>({
+  queryKey: ["comments", post.id],
+  queryFn: () => commentService.getComments(post.id), 
+  enabled: showCommentForm, 
+  staleTime: 0,          
+});
+
+console.log("post id: ", post.id);
+console.log("Comments loading:", commentsLoading, "Comments:", comments);
+
+const createCommentMutation = useMutation({
+  mutationFn: (content: string) =>
+    commentService.createComment(post.id, { commentText: content, userId: user?.id || 0 }),
+
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ["comments", post.id] });
+    setCommentText("");
+  },
+});
+
 
   return (
     <>
@@ -207,60 +234,88 @@ export default function PostCard({
           )}
         </CardContent>
 
-        {showActions && (
-          <CardActions disableSpacing sx={{ pt: 0 }}>
-            <Box sx={{ display: "flex", gap: 1 }}>
-              <IconButton aria-label="like" size="small">
-                <LikeIcon fontSize="small" />
-                <Typography variant="caption" sx={{ ml: 0.5 }}>
-                  0
-                </Typography>
-              </IconButton>
+      {showActions && !isOwnPost && (
+  <CardActions disableSpacing sx={{ pt: 0 }}>
+    <IconButton
+      aria-label="comment"
+      size="small"
+      onClick={() => setShowCommentForm(!showCommentForm)}
+    >
+      <CommentIcon fontSize="small" />
+    </IconButton>
+  </CardActions>
+)}
 
-              <IconButton
-                aria-label="comment"
-                size="small"
-                onClick={() => setShowCommentForm(!showCommentForm)}
-              >
-                <CommentIcon fontSize="small" />
-              </IconButton>
 
-              <IconButton aria-label="share" size="small">
-                <ShareIcon fontSize="small" />
-              </IconButton>
-            </Box>
-          </CardActions>
-        )}
+       {showCommentForm && (
+  <Box sx={{ p: 2, borderTop: 1, borderColor: "divider" }}>
 
-        {showCommentForm && (
-          <Box sx={{ p: 2, borderTop: 1, borderColor: "divider" }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
-              Add a comment
-            </Typography>
-            <TextField
-              fullWidth
-              multiline
-              rows={2}
-              placeholder="Write a comment..."
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-              sx={{ mb: 1 }}
-            />
-            <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1 }}>
-              <Button size="small" onClick={() => setShowCommentForm(false)}>
-                Cancel
-              </Button>
-              <Button
-                size="small"
-                variant="contained"
-                onClick={handleComment}
-                disabled={!commentText.trim()}
-              >
-                Comment
-              </Button>
-            </Box>
-          </Box>
-        )}
+    {/* Existing comment input */}
+    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+      Add a comment
+    </Typography>
+
+    <TextField
+      fullWidth
+      multiline
+      rows={2}
+      placeholder="Write a comment..."
+      value={commentText}
+      onChange={(e) => setCommentText(e.target.value)}
+      sx={{ mb: 1 }}
+    />
+
+    <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1 }}>
+      <Button size="small" onClick={() => setShowCommentForm(false)}>
+        Cancel
+      </Button>
+
+      <Button
+        size="small"
+        variant="contained"
+        onClick={handleComment}
+        disabled={!commentText.trim() || createCommentMutation.isPending}
+      >
+        Comment
+      </Button>
+    </Box>
+
+    {/* COMMENTS LIST */}
+    <Box sx={{ mt: 2 }}>
+
+      {commentsLoading ? (
+        <Typography variant="body2">Loading comments...</Typography>
+      ) : comments.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          No comments yet
+        </Typography>
+      ) : (
+       comments.map((comment: CommentResponseDto) => (
+  <Box
+    key={comment.id}
+    sx={{
+      mt: 1,
+      p: 1,
+      borderRadius: 1,
+      backgroundColor: "background.default",
+    }}
+  >
+    <Typography variant="subtitle2">
+      {comment.user?.displayName || "Unknown"}
+    </Typography>
+    <Typography variant="body2">
+      {comment.commentText}
+    </Typography>
+  </Box>
+))
+
+      )}
+
+    </Box>
+
+  </Box>
+)}
+
       </Card>
 
       <Dialog

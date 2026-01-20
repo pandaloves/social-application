@@ -9,7 +9,6 @@ import {
   Paper,
   Avatar,
   Button,
-  TextField,
   CircularProgress,
   Alert,
   AlertTitle,
@@ -18,7 +17,6 @@ import {
   Chip,
   Tabs,
   Tab,
-  IconButton,
 } from "@mui/material";
 import {
   Person as PersonIcon,
@@ -46,20 +44,18 @@ export default function WallPage() {
   // Check if this is the current user's wall
   const isOwnWall = currentUser?.username === username;
 
-  // Fetch user with posts
-  // Update your query function in WallPage.tsx
+  // Fetch user data
   const {
     data: userData,
     isLoading: userLoading,
     error: userError,
-    refetch: refetchUser,
   } = useQuery({
     queryKey: ["user", username],
     queryFn: async () => {
       console.log("Fetching user for username:", username);
 
       try {
-        // First get user by username to get ID
+        // Get all users to find the correct user
         const users = await userService.getUsers();
         console.log("All users:", users);
 
@@ -70,12 +66,7 @@ export default function WallPage() {
           throw new Error(`User with username ${username} not found`);
         }
 
-        console.log("Fetching user with posts for ID:", foundUser.id);
-        // Then get user with posts using the ID
-        const userWithPosts = await userService.getUserWithPosts(foundUser.id);
-        console.log("User with posts:", userWithPosts);
-
-        return userWithPosts;
+        return foundUser;
       } catch (error) {
         console.error("Error in user query:", error);
         throw error;
@@ -84,15 +75,44 @@ export default function WallPage() {
     enabled: !!username && isAuthenticated,
   });
 
+  // Fetch posts for this user
+  const {
+    data: postsData = [],
+    isLoading: postsLoading,
+    error: postsError,
+    refetch: refetchPosts,
+  } = useQuery({
+    queryKey: ["user-posts", username],
+    queryFn: async () => {
+      try {
+        // Get all posts
+        const allPosts = await postService.getPosts();
+        console.log("All the auth posts:", allPosts);
+
+        // Filter posts by author
+        const userPosts = Array.isArray(allPosts)
+          ? allPosts.filter((post: any) => post.author?.username === username)
+          : allPosts?.content?.filter((post: any) => post.author?.username === username) || [];
+
+        console.log("User posts:", userPosts);
+        return userPosts;
+      } catch (error) {
+        console.error("Error fetching posts:", error);
+        return [];
+      }
+    },
+    enabled: !!username && !!userData && isAuthenticated,
+  });
+
   // Create post mutation
   const createPostMutation = useMutation({
     mutationFn: (content: string) =>
       postService.createPost({
         content,
-        userId: currentUser?.id || 0,
+        userId: currentUser?.id || 0, 
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user", username] });
+      queryClient.invalidateQueries({ queryKey: ["user-posts", username] });
       setCreateDialogOpen(false);
     },
   });
@@ -100,9 +120,12 @@ export default function WallPage() {
   // Update post mutation
   const updatePostMutation = useMutation({
     mutationFn: ({ id, content }: { id: number; content: string }) =>
-      postService.updatePost(id, { content, userId: currentUser?.id || 0 }),
+      postService.updatePost(id, { 
+        content, 
+        userId: currentUser?.id || 0 
+      }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user", username] });
+      queryClient.invalidateQueries({ queryKey: ["user-posts", username] });
     },
   });
 
@@ -110,7 +133,7 @@ export default function WallPage() {
   const deletePostMutation = useMutation({
     mutationFn: (id: number) => postService.deletePost(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user", username] });
+      queryClient.invalidateQueries({ queryKey: ["user-posts", username] });
     },
   });
 
@@ -171,6 +194,21 @@ export default function WallPage() {
     );
   }
 
+  // Create a safe user object with fallback values
+  const safeUser = {
+    id: userData?.id || 0,
+    username: userData?.username || "unknown",
+    displayName: userData?.displayName || userData?.username || "User",
+    email: userData?.email || "",
+    bio: userData?.bio || "",
+    // Add createdAt if available
+    createdAt: userData?.createdAt || new Date().toISOString(),
+  };
+
+  // Use optional chaining for posts
+  const posts = postsData || [];
+  const isLoading = userLoading || postsLoading;
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       {/* Back button */}
@@ -185,7 +223,7 @@ export default function WallPage() {
       {/* User Profile Header */}
       <Paper sx={{ p: 4, mb: 4, borderRadius: 2 }}>
         <Grid container spacing={3} alignItems="center">
-          <Grid sx={{ xs: 12, md: 6 }}>
+          <Grid sx={{xs: 12, md: 5}} >
             <Avatar
               sx={{
                 width: 120,
@@ -194,15 +232,13 @@ export default function WallPage() {
                 fontSize: "2.5rem",
               }}
             >
-              {userData.user.displayName?.charAt(0) || (
-                <PersonIcon sx={{ fontSize: 60 }} />
-              )}
+              {safeUser.displayName.charAt(0).toUpperCase()}
             </Avatar>
           </Grid>
-          <Grid sx={{ xs: 12, md: 6 }}>
+           <Grid sx={{xs: 12, md: 5}} >
             <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1 }}>
               <Typography variant="h3" component="h1">
-                {userData.user.displayName}
+                {safeUser.displayName}
               </Typography>
               {isOwnWall && (
                 <Button
@@ -218,18 +254,18 @@ export default function WallPage() {
               )}
             </Box>
             <Typography variant="h6" color="text.secondary" gutterBottom>
-              @{userData.user.username}
+              @{safeUser.username}
             </Typography>
 
-            {userData.user.bio && (
+            {safeUser.bio && (
               <Typography paragraph sx={{ mt: 2, mb: 3 }}>
-                {userData.user.bio}
+                {safeUser.bio}
               </Typography>
             )}
 
             <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
               <Chip
-                label={`${userData.posts?.length || 0} posts`}
+                label={`${posts.length} posts`}
                 variant="outlined"
               />
               <Chip label="0 friends" variant="outlined" />
@@ -294,20 +330,28 @@ export default function WallPage() {
 
           <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
             {isOwnWall ? "Your Posts" : "Posts"}
-            {userData.posts && userData.posts.length > 0 && (
+            {posts.length > 0 && (
               <Typography
                 component="span"
                 color="text.secondary"
                 sx={{ ml: 1 }}
               >
-                ({userData.posts.length})
+                ({posts.length})
               </Typography>
             )}
           </Typography>
 
-          {/* Posts List */}
-          {userData.posts && userData.posts.length > 0 ? (
-            userData.posts.map((post: PostResponseDto) => (
+          {/* Loading state for posts */}
+          {postsLoading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : postsError ? (
+            <Alert severity="error" sx={{ mb: 3 }}>
+              Failed to load posts. Please try again.
+            </Alert>
+          ) : posts.length > 0 ? (
+            posts.map((post: PostResponseDto) => (
               <PostCard
                 key={post.id}
                 post={post}
@@ -335,11 +379,11 @@ export default function WallPage() {
       {tabValue === 1 && (
         <Paper sx={{ p: 4, borderRadius: 2 }}>
           <Typography variant="h5" gutterBottom>
-            About {userData.user.displayName}
+            About {safeUser.displayName}
           </Typography>
 
           <Grid container spacing={3}>
-            <Grid sx={{ xs: 12, md: 6 }}>
+              <Grid sx={{xs: 12, md: 5}} >
               <Box sx={{ mb: 3 }}>
                 <Typography
                   variant="subtitle2"
@@ -349,12 +393,12 @@ export default function WallPage() {
                   Bio
                 </Typography>
                 <Typography>
-                  {userData.user.bio || "No bio provided"}
+                  {safeUser.bio || "No bio provided"}
                 </Typography>
               </Box>
             </Grid>
 
-            <Grid sx={{ xs: 12, md: 6 }}>
+            <Grid sx={{xs: 12, md: 5}} >
               <Box sx={{ mb: 3 }}>
                 <Typography
                   variant="subtitle2"
@@ -363,7 +407,7 @@ export default function WallPage() {
                 >
                   Username
                 </Typography>
-                <Typography>@{userData.user.username}</Typography>
+                <Typography>@{safeUser.username}</Typography>
               </Box>
 
               <Box sx={{ mb: 3 }}>
@@ -375,8 +419,7 @@ export default function WallPage() {
                   Member Since
                 </Typography>
                 <Typography>
-                  {new Date().toLocaleDateString()}{" "}
-                  {/* You might want to add registration date to your API */}
+                  {new Date(safeUser.createdAt).toLocaleDateString()}
                 </Typography>
               </Box>
             </Grid>
@@ -392,7 +435,7 @@ export default function WallPage() {
           </Typography>
 
           {/* Friends List */}
-          <FriendsList userId={userData.user.id} isOwnWall={isOwnWall} />
+          <FriendsList userId={safeUser.id} isOwnWall={isOwnWall} />
         </Paper>
       )}
 

@@ -76,9 +76,8 @@ export const authService = {
   },
 };
 
-// User Service - ADD getUsers method here
+// User Service
 export const userService = {
-  // Add this method
   getUsers: async () => {
     const response = await api.get('/users');
     return response.data;
@@ -86,11 +85,6 @@ export const userService = {
   
   getUserById: async (id: number) => {
     const response = await api.get(`/users/${id}`);
-    return response.data;
-  },
-  
-  getUserWithPosts: async (id: number) => {
-    const response = await api.get(`/users/${id}/with-posts`);
     return response.data;
   },
   
@@ -116,15 +110,35 @@ export const userService = {
 
 // Post Service
 export const postService = {
-  getPosts: async (params?: { page?: number; size?: number; sort?: string }) => {
-    const response = await api.get('/posts', { params });
-    
-    if (response.data && response.data.content) {
-      return response.data.content; 
+getPosts: async (params?: { page?: number; size?: number; sort?: string }) => {
+
+  let userId;
+
+  // Read authenticated user
+  if (typeof window !== 'undefined') {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      const user = JSON.parse(storedUser);
+      userId = user?.id;
     }
-    
-    return response.data;
-  },
+  }
+
+  const response = await api.get('/posts', {
+    params: {
+      userId: userId,             
+      page: params?.page ?? 0,
+      size: params?.size ?? 10,
+      sort: params?.sort ?? 'createdAt,desc'
+    }
+  });
+
+  // Spring Page response handling
+  if (response.data?.content) {
+    return response.data.content;
+  }
+
+  return response.data;
+},
 
   getPostsWithPagination: async (params?: { page?: number; size?: number; sort?: string }) => {
     const response = await api.get('/posts', { params });
@@ -186,5 +200,20 @@ export const friendshipService = {
     return response.data;
   },
 };
+
+// Export convenience functions with proper typing
+export const fetchComments = (postId: number) => commentService.getComments(postId);
+export const createComment = (postId: number, commentData: CommentRequestDto) => 
+  commentService.createComment(postId, commentData);
+
+// Also export other commonly used functions
+export const login = (credentials: LoginRequest) => authService.login(credentials);
+export const register = (userData: UserRequestDto) => authService.register(userData);
+export const logout = () => authService.logout();
+export const getCurrentUser = () => authService.getCurrentUser();
+export const fetchUserProfile = (userId: number) => userService.getUserById(userId);
+export const fetchFeedPosts = (params?: { page?: number; size?: number; sort?: string }) => 
+  postService.getPosts(params);
+export const fetchFriends = (userId: number) => userService.getFriends(userId);
 
 export default api;
