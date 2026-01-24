@@ -153,7 +153,9 @@ export type PostCardProps = {
    onAddFriend?: (userId: number) => void;
   showActions?: boolean;
   isFriend?: boolean;
+ isPending?: boolean;
 };
+
 
 export type CreatePostDialogProps = {
   open: boolean;

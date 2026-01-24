@@ -41,9 +41,10 @@ export default function FeedPage() {
   const queryClient = useQueryClient();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
-  const { data: friends = [] } = useQuery<FriendshipResponseDto[]>({
-    queryKey: ["friends", user?.id],
-    queryFn: () => userService.getFriends(user!.id),
+  // Fetch friendships instead of just friends
+  const { data: friendships = [] } = useQuery<FriendshipResponseDto[]>({
+    queryKey: ["friendships", user?.id],
+    queryFn: () => friendshipService.getFriendships(user!.id),
     enabled: !!user?.id,
   });
 
@@ -57,10 +58,34 @@ export default function FeedPage() {
     severity: "success",
   });
 
+  // Helper function to check if two users are friends
   const isFriend = (authorId: number) => {
-    if (!friends || !authorId) return false;
+    if (!friendships || !authorId || !user?.id) return false;
 
-    return friends.some((friend) => friend.id === authorId);
+    return friendships.some((friendship) => {
+      const isAccepted = friendship.status === "ACCEPTED";
+      const involvesAuthor =
+        friendship.requester?.id === authorId ||
+        friendship.addressee?.id === authorId;
+      const involvesCurrentUser =
+        friendship.requester?.id === user.id ||
+        friendship.addressee?.id === user.id;
+
+      return isAccepted && involvesAuthor && involvesCurrentUser;
+    });
+  };
+
+  // Helper function to check if there's a pending request from current user to author
+  const isRequestPending = (authorId: number) => {
+    if (!friendships || !authorId || !user?.id) return false;
+
+    return friendships.some((friendship) => {
+      const isPending = friendship.status === "PENDING";
+      const isFromCurrentUser = friendship.requester?.id === user.id;
+      const isToAuthor = friendship.addressee?.id === authorId;
+
+      return isPending && isFromCurrentUser && isToAuthor;
+    });
   };
 
   // Redirect if not authenticated
@@ -70,35 +95,30 @@ export default function FeedPage() {
     }
   }, [isAuthenticated, router]);
 
-  // Fetch posts
+  // Fetch posts - FIXED: Use the same query key pattern as WallPage
   const {
-    data: postsData,
+    data: posts = [],
     isLoading,
     error,
-    refetch,
   } = useQuery({
-    queryKey: ["posts"],
+    queryKey: ["posts", "feed"],
     queryFn: async () => {
       try {
-        const response = await api.get("/posts", {
-          params: {
-            page: 0,
-            size: 10,
-            sort: "createdAt,desc",
-          },
+        console.log("Fetching feed posts...");
+        const postsData = await postService.getPosts({
+          page: 0,
+          size: 50,
+          sort: "createdAt,desc",
         });
-
-        return response.data.content || response.data || [];
+        console.log("Feed posts fetched:", postsData?.length || 0, "posts");
+        return Array.isArray(postsData) ? postsData : [];
       } catch (error) {
-        console.error("Error fetching posts:", error);
+        console.error("Error fetching feed posts:", error);
         return [];
       }
     },
     enabled: isAuthenticated,
   });
-
-  // Extract posts from postsData (which should now be an array)
-  const posts = postsData || [];
 
   const addFriendMutation = useMutation({
     mutationFn: (receiverId: number) =>
@@ -106,9 +126,37 @@ export default function FeedPage() {
         requesterUserId: user!.id,
         addresseeUserId: receiverId,
       }),
+    onMutate: async (receiverId) => {
+      // Cancel outgoing queries
+      await queryClient.cancelQueries({ queryKey: ["friendships", user?.id] });
 
+      // Snapshot previous value
+      const previousFriendships =
+        queryClient.getQueryData(["friendships", user?.id]) || [];
+
+      // Create optimistic friendship
+      const optimisticFriendship = {
+        id: Date.now(), // Temporary ID
+        status: "PENDING",
+        requester: user,
+        addressee: { id: receiverId },
+        createdAt: new Date().toISOString(),
+      };
+
+      // Optimistically update friendships
+      queryClient.setQueryData(
+        ["friendships", user?.id],
+        (oldData: any[] = []) => {
+          console.log("Optimistically adding friendship to feed");
+          return [...oldData, optimisticFriendship];
+        },
+      );
+
+      return { previousFriendships };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["friends"] });
+      // Invalidate friendships query to get fresh data
+      queryClient.invalidateQueries({ queryKey: ["friendships", user?.id] });
 
       setSnackbar({
         open: true,
@@ -116,8 +164,17 @@ export default function FeedPage() {
         severity: "success",
       });
     },
+    onError: (error, receiverId, context) => {
+      console.error("Error sending friend request:", error);
 
-    onError: () => {
+      // Rollback to previous value
+      if (context?.previousFriendships) {
+        queryClient.setQueryData(
+          ["friendships", user?.id],
+          context.previousFriendships,
+        );
+      }
+
       setSnackbar({
         open: true,
         message: "Failed to send friend request",
@@ -129,19 +186,108 @@ export default function FeedPage() {
   const handleAddFriend = (receiverId: number) => {
     if (!user?.id) return;
 
+    // Check if already friends
+    if (isFriend(receiverId)) {
+      setSnackbar({
+        open: true,
+        message: "You are already friends with this user",
+        severity: "info",
+      });
+      return;
+    }
+
+    // Check if request already pending
+    if (isRequestPending(receiverId)) {
+      setSnackbar({
+        open: true,
+        message: "Friend request already sent",
+        severity: "info",
+      });
+      return;
+    }
+
     addFriendMutation.mutate(receiverId);
   };
 
-  // Create post mutation
+  // Create post mutation - UPDATED to properly update cache
   const createPostMutation = useMutation({
     mutationFn: (content: string) =>
       postService.createPost({
         content,
         userId: user?.id || 0,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["posts"] });
+    onMutate: async (content) => {
+      // Cancel outgoing queries
+      await queryClient.cancelQueries({ queryKey: ["posts", "feed"] });
+
+      // Snapshot previous value
+      const previousFeedPosts =
+        queryClient.getQueryData(["posts", "feed"]) || [];
+
+      // Create optimistic post
+      const optimisticPost = {
+        id: Date.now(), // Temporary ID
+        content,
+        author: user,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        comments: [],
+      };
+
+      // Optimistically update feed posts
+      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
+        console.log("Optimistically adding post to feed (from FeedPage)");
+        return [optimisticPost, ...oldData];
+      });
+
+      return { previousFeedPosts };
+    },
+    onSuccess: (newPost) => {
+      console.log("Post created successfully from FeedPage:", newPost);
+
+      // Replace optimistic post with real one
+      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
+        const filtered = oldData.filter((post) => post.id !== Date.now());
+        return [newPost, ...filtered];
+      });
+
+      // Also update user's wall cache if viewing own wall
+      if (user?.id) {
+        queryClient.setQueryData(
+          ["posts", "user", user.id],
+          (oldData: any[] = []) => {
+            const filtered = oldData.filter((post) => post.id !== Date.now());
+            return [newPost, ...filtered];
+          },
+        );
+      }
+
+      // Invalidate queries to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ["posts", "feed"] });
+      if (user?.id) {
+        queryClient.invalidateQueries({ queryKey: ["posts", "user", user.id] });
+      }
+
       setCreateDialogOpen(false);
+      setSnackbar({
+        open: true,
+        message: "Post created successfully!",
+        severity: "success",
+      });
+    },
+    onError: (error, content, context) => {
+      console.error("Error creating post from FeedPage:", error);
+
+      // Rollback to previous value
+      if (context?.previousFeedPosts) {
+        queryClient.setQueryData(["posts", "feed"], context.previousFeedPosts);
+      }
+
+      setSnackbar({
+        open: true,
+        message: "Failed to create post",
+        severity: "error",
+      });
     },
   });
 
@@ -149,16 +295,76 @@ export default function FeedPage() {
   const updatePostMutation = useMutation({
     mutationFn: ({ id, content }: { id: number; content: string }) =>
       postService.updatePost(id, { content, userId: user?.id || 0 }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["posts"] });
+    onSuccess: (updatedPost) => {
+      // Update post in feed
+      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
+        return oldData.map((post) =>
+          post.id === updatedPost.id ? updatedPost : post,
+        );
+      });
+
+      // Also update in user's wall if needed
+      if (user?.id && updatedPost.author?.id === user.id) {
+        queryClient.setQueryData(
+          ["posts", "user", user.id],
+          (oldData: any[] = []) => {
+            return oldData.map((post) =>
+              post.id === updatedPost.id ? updatedPost : post,
+            );
+          },
+        );
+      }
+
+      setSnackbar({
+        open: true,
+        message: "Post updated successfully!",
+        severity: "success",
+      });
     },
   });
 
   // Delete post mutation
   const deletePostMutation = useMutation({
     mutationFn: (id: number) => postService.deletePost(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["posts"] });
+    onMutate: async (postId) => {
+      // Cancel outgoing queries
+      await queryClient.cancelQueries({ queryKey: ["posts", "feed"] });
+
+      // Snapshot previous value
+      const previousFeedPosts =
+        queryClient.getQueryData(["posts", "feed"]) || [];
+
+      // Optimistically remove from feed
+      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
+        return oldData.filter((post) => post.id !== postId);
+      });
+
+      return { previousFeedPosts };
+    },
+    onSuccess: (_, postId) => {
+      // Also remove from user's wall if needed
+      if (user?.id) {
+        queryClient.setQueryData(
+          ["posts", "user", user.id],
+          (oldData: any[] = []) => {
+            return oldData.filter((post) => post.id !== postId);
+          },
+        );
+      }
+
+      setSnackbar({
+        open: true,
+        message: "Post deleted successfully!",
+        severity: "success",
+      });
+    },
+    onError: (error, postId, context) => {
+      console.error("Error deleting post:", error);
+
+      // Rollback to previous value
+      if (context?.previousFeedPosts) {
+        queryClient.setQueryData(["posts", "feed"], context.previousFeedPosts);
+      }
     },
   });
 
@@ -171,7 +377,9 @@ export default function FeedPage() {
   };
 
   const handleDeletePost = (id: number) => {
-    deletePostMutation.mutate(id);
+    if (window.confirm("Are you sure you want to delete this post?")) {
+      deletePostMutation.mutate(id);
+    }
   };
 
   const handleComment = (postId: number, comment: string) => {
@@ -205,7 +413,8 @@ export default function FeedPage() {
     );
   }
 
-  console.log("Friends:", friends);
+  console.log("Feed posts:", posts.length);
+  console.log("Friendships for feed:", friendships.length);
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>

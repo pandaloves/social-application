@@ -134,27 +134,47 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
   const acceptMutation = useMutation({
     mutationFn: (friendshipId: number) =>
       friendshipService.acceptFriendship(friendshipId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["friendships", userId] });
+    onSuccess: (_, friendshipId) => {
+      // Get the friendship data to know which users are involved
+      const friendship = friendships.find((f: any) => f.id === friendshipId);
+      if (friendship) {
+        // Invalidate both users' friendships
+        queryClient.invalidateQueries({ queryKey: ["friendships", userId] });
+        if (friendship.requester?.id !== userId) {
+          queryClient.invalidateQueries({
+            queryKey: ["friendships", friendship.requester?.id],
+          });
+        }
+        if (friendship.addressee?.id !== userId) {
+          queryClient.invalidateQueries({
+            queryKey: ["friendships", friendship.addressee?.id],
+          });
+        }
+      }
     },
   });
 
-  // Reject friendship mutation
+  // Update rejectMutation similarly:
   const rejectMutation = useMutation({
     mutationFn: (friendshipId: number) =>
       friendshipService.rejectFriendship(friendshipId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["friendships", userId] });
+    onSuccess: (_, friendshipId) => {
+      const friendship = friendships.find((f: any) => f.id === friendshipId);
+      if (friendship) {
+        queryClient.invalidateQueries({ queryKey: ["friendships", userId] });
+        if (friendship.requester?.id !== userId) {
+          queryClient.invalidateQueries({
+            queryKey: ["friendships", friendship.requester?.id],
+          });
+        }
+        if (friendship.addressee?.id !== userId) {
+          queryClient.invalidateQueries({
+            queryKey: ["friendships", friendship.addressee?.id],
+          });
+        }
+      }
     },
   });
-
-  if (isLoading) {
-    return (
-      <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
-        <Typography>Loading friends...</Typography>
-      </Box>
-    );
-  }
 
   if (error) {
     return (
