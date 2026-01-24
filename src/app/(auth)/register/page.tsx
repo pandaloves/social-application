@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Container,
   Paper,
@@ -64,11 +64,6 @@ export default function RegisterPage() {
     // Validation
     if (formData.password !== formData.confirmPassword) {
       setError("Passwords do not match");
-      return;
-    }
-
-    if (formData.password.length < 6) {
-      setError("Password must be at least 6 characters long");
       return;
     }
 
@@ -199,7 +194,7 @@ export default function RegisterPage() {
                 margin="normal"
                 required
                 disabled={isLoading}
-                helperText="At least 6 characters"
+                helperText="Enter password"
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -241,6 +236,7 @@ export default function RegisterPage() {
                   endAdornment: (
                     <InputAdornment position="end">
                       <IconButton
+                        sx={{ color: "primary.main" }}
                         aria-label="toggle password visibility"
                         onClick={() =>
                           setShowConfirmPassword(!showConfirmPassword)

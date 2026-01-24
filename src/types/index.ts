@@ -106,10 +106,10 @@ export type FriendshipDto ={
   createdAt: string;
 }
 
-export type FriendshipRequestDto={
-  requesterId: number;
-  receiverId: number;
-  status: string;
+export type FriendshipRequestDto = {
+  requesterUserId: number;
+  addresseeUserId: number;
+    status?: string;
 }
 
 // Pagination Types
@@ -150,8 +150,10 @@ export type PostCardProps = {
   onEdit?: (id: number, content: string) => void;
   onDelete?: (id: number) => void;
   onComment?: (postId: number, comment: string) => void;
+   onAddFriend?: (userId: number) => void;
   showActions?: boolean;
-}
+  isFriend?: boolean;
+};
 
 export type CreatePostDialogProps = {
   open: boolean;
@@ -237,7 +239,7 @@ export type FriendshipStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED';
 export type FriendshipResponseDto = {
   id: number;
   requester: UserResponseDto;
-  receiver: UserResponseDto;  // Changed from addressee to receiver
+  addressee: UserResponseDto;
   status: FriendshipStatus;
   createdAt: string;
 }
