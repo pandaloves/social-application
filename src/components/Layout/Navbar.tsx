@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   AppBar,
   Toolbar,
@@ -43,7 +43,7 @@ export default function Navbar() {
 
   const handleMyWall = () => {
     if (user) {
-      router.push(`/wall/${user.username}`);
+      router.push(`/wall/${user.id}`);
     }
     handleMenuClose();
   };
@@ -76,7 +76,7 @@ export default function Navbar() {
           {isAuthenticated ? (
             <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
               <Link href="/feed" passHref>
-                <Button color="inherit">Feed</Button>
+                <Button sx={{ fontSize: "1rem", color: "white" }}>Feed</Button>
               </Link>
 
               <IconButton
@@ -111,19 +111,31 @@ export default function Navbar() {
                 onClose={handleMenuClose}
               >
                 <MenuItem onClick={handleMyWall}>
-                  <PersonIcon sx={{ mr: 1 }} />
+                  <PersonIcon sx={{ mr: 1, color: "primary.main" }} />
                   My Wall
                 </MenuItem>
-                <MenuItem onClick={handleLogout}>Logout</MenuItem>
+                <MenuItem
+                  onClick={handleLogout}
+                  sx={{
+                    color: "error.main",
+                    mt: 1,
+                  }}
+                >
+                  Logout
+                </MenuItem>
               </Menu>
             </Box>
           ) : (
             <Box sx={{ display: "flex", gap: 1 }}>
               <Link href="/login" passHref>
-                <Button color="inherit">Login</Button>
+                <Button sx={{ fontSize: "1rem", color: "white" }}>Login</Button>
               </Link>
               <Link href="/register" passHref>
-                <Button variant="contained" color="secondary">
+                <Button
+                  variant="contained"
+                  color="inherit"
+                  sx={{ fontSize: "1rem" }}
+                >
                   Register
                 </Button>
               </Link>

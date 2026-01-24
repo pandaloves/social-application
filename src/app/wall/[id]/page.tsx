@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   Container,
@@ -13,7 +13,6 @@ import {
   Alert,
   AlertTitle,
   Grid,
-  Divider,
   Chip,
   Tabs,
   Tab,
@@ -28,42 +27,45 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api, { postService, userService } from "@/src/services/api";
 import PostCard from "@/src/components/Post/PostCard";
 import CreatePostDialog from "@/src/components/Post/CreatePostDialog";
-import { PostResponseDto } from "@/src/types";
+import { PostResponseDto, UserResponseDto } from "@/src/types";
 import { useAuth } from "@/src/contexts/AuthContext";
 import FriendsList from "@/src/components/Friends/FriendsList";
+import EditProfileDialog from "@/src/components/EditProfileDialog";
 
 export default function WallPage() {
   const params = useParams();
   const router = useRouter();
-  const username = params.username as string;
+  const id = Number(params.id);
   const { user: currentUser, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [tabValue, setTabValue] = useState(0);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
 
   // Check if this is the current user's wall
-  const isOwnWall = currentUser?.username === username;
+  const isOwnWall = currentUser?.id === id;
 
   // Fetch user data
   const {
     data: userData,
     isLoading: userLoading,
     error: userError,
+    refetch: refetchUser,
   } = useQuery({
-    queryKey: ["user", username],
+    queryKey: ["user", id],
     queryFn: async () => {
-      console.log("Fetching user for username:", username);
+      console.log("Fetching user for id:", id);
 
       try {
         // Get all users to find the correct user
         const users = await userService.getUsers();
         console.log("All users:", users);
 
-        const foundUser = users.find((u: any) => u.username === username);
+        const foundUser = users.find((u: UserResponseDto) => u.id === id);
         console.log("Found user:", foundUser);
 
         if (!foundUser) {
-          throw new Error(`User with username ${username} not found`);
+          throw new Error(`User with id ${id} not found`);
         }
 
         return foundUser;
@@ -72,7 +74,7 @@ export default function WallPage() {
         throw error;
       }
     },
-    enabled: !!username && isAuthenticated,
+    enabled: !!id && isAuthenticated,
   });
 
   // Fetch posts for this user
@@ -82,7 +84,7 @@ export default function WallPage() {
     error: postsError,
     refetch: refetchPosts,
   } = useQuery({
-    queryKey: ["user-posts", username],
+    queryKey: ["user-posts", id],
     queryFn: async () => {
       try {
         // Get all posts
@@ -91,8 +93,9 @@ export default function WallPage() {
 
         // Filter posts by author
         const userPosts = Array.isArray(allPosts)
-          ? allPosts.filter((post: any) => post.author?.username === username)
-          : allPosts?.content?.filter((post: any) => post.author?.username === username) || [];
+          ? allPosts.filter((post: any) => post.author?.id === id)
+          : allPosts?.content?.filter((post: any) => post.author?.id === id) ||
+            [];
 
         console.log("User posts:", userPosts);
         return userPosts;
@@ -101,7 +104,7 @@ export default function WallPage() {
         return [];
       }
     },
-    enabled: !!username && !!userData && isAuthenticated,
+    enabled: !!id && !!userData && isAuthenticated,
   });
 
   // Create post mutation
@@ -109,10 +112,10 @@ export default function WallPage() {
     mutationFn: (content: string) =>
       postService.createPost({
         content,
-        userId: currentUser?.id || 0, 
+        userId: currentUser?.id || 0,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user-posts", username] });
+      queryClient.invalidateQueries({ queryKey: ["user-posts", id] });
       setCreateDialogOpen(false);
     },
   });
@@ -120,12 +123,12 @@ export default function WallPage() {
   // Update post mutation
   const updatePostMutation = useMutation({
     mutationFn: ({ id, content }: { id: number; content: string }) =>
-      postService.updatePost(id, { 
-        content, 
-        userId: currentUser?.id || 0 
+      postService.updatePost(id, {
+        content,
+        userId: currentUser?.id || 0,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user-posts", username] });
+      queryClient.invalidateQueries({ queryKey: ["user-posts", id] });
     },
   });
 
@@ -133,7 +136,7 @@ export default function WallPage() {
   const deletePostMutation = useMutation({
     mutationFn: (id: number) => postService.deletePost(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user-posts", username] });
+      queryClient.invalidateQueries({ queryKey: ["user-posts", id] });
     },
   });
 
@@ -151,6 +154,30 @@ export default function WallPage() {
 
   const handleBackToFeed = () => {
     router.push("/feed");
+  };
+
+  // Handle profile update success
+  const handleProfileUpdated = async () => {
+    try {
+      // Invalidate and refetch user data
+      await queryClient.invalidateQueries({ queryKey: ["user", id] });
+
+      // If this is the current user's wall
+      if (isOwnWall && currentUser) {
+        // Force a refetch of the user data
+        const updatedUserData = await refetchUser();
+        // Redirect to new username URL
+        router.push(`/wall/${id}`);
+        return; // Stop execution here since we're redirecting
+      } else {
+        console.error("No updated user data received");
+      }
+
+      // Refetch posts to ensure they're updated
+      await refetchPosts();
+    } catch (error) {
+      console.error("Error in handleProfileUpdated:", error);
+    }
   };
 
   // Redirect if not authenticated
@@ -207,7 +234,6 @@ export default function WallPage() {
 
   // Use optional chaining for posts
   const posts = postsData || [];
-  const isLoading = userLoading || postsLoading;
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -223,7 +249,7 @@ export default function WallPage() {
       {/* User Profile Header */}
       <Paper sx={{ p: 4, mb: 4, borderRadius: 2 }}>
         <Grid container spacing={3} alignItems="center">
-          <Grid sx={{xs: 12, md: 5}} >
+          <Grid sx={{ xs: 12, md: 5 }}>
             <Avatar
               sx={{
                 width: 120,
@@ -235,27 +261,22 @@ export default function WallPage() {
               {safeUser.displayName.charAt(0).toUpperCase()}
             </Avatar>
           </Grid>
-           <Grid sx={{xs: 12, md: 5}} >
+          <Grid sx={{ xs: 12, md: 7 }}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1 }}>
               <Typography variant="h3" component="h1">
                 {safeUser.displayName}
               </Typography>
               {isOwnWall && (
                 <Button
-                  startIcon={<EditIcon />}
+                  startIcon={<EditIcon sx={{ color: "primary.main" }} />}
                   variant="outlined"
                   size="small"
-                  onClick={() => {
-                    /* Open edit profile dialog */
-                  }}
+                  onClick={() => setEditProfileOpen(true)}
                 >
                   Edit Profile
                 </Button>
               )}
             </Box>
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              @{safeUser.username}
-            </Typography>
 
             {safeUser.bio && (
               <Typography paragraph sx={{ mt: 2, mb: 3 }}>
@@ -264,10 +285,7 @@ export default function WallPage() {
             )}
 
             <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-              <Chip
-                label={`${posts.length} posts`}
-                variant="outlined"
-              />
+              <Chip label={`${posts.length} posts`} variant="outlined" />
               <Chip label="0 friends" variant="outlined" />
               <Chip label="Member" color="primary" variant="outlined" />
             </Box>
@@ -312,17 +330,6 @@ export default function WallPage() {
                   sx={{ justifyContent: "flex-start", textAlign: "left" }}
                 >
                   What's on your mind, {currentUser?.displayName}?
-                </Button>
-              </Box>
-
-              <Divider sx={{ my: 2 }} />
-
-              <Box sx={{ display: "flex", justifyContent: "center", gap: 1 }}>
-                <Button startIcon={<AddIcon />} size="small">
-                  Photo/Video
-                </Button>
-                <Button startIcon={<PersonIcon />} size="small">
-                  Tag Friends
                 </Button>
               </Box>
             </Paper>
@@ -383,37 +390,35 @@ export default function WallPage() {
           </Typography>
 
           <Grid container spacing={3}>
-              <Grid sx={{xs: 12, md: 5}} >
+            <Grid sx={{ xs: 12, md: 6 }}>
               <Box sx={{ mb: 3 }}>
                 <Typography
                   variant="subtitle2"
-                  color="text.secondary"
+                  color="primary.main"
                   gutterBottom
                 >
                   Bio
                 </Typography>
-                <Typography>
-                  {safeUser.bio || "No bio provided"}
-                </Typography>
+                <Typography>{safeUser.bio || "No bio provided"}</Typography>
               </Box>
             </Grid>
 
-            <Grid sx={{xs: 12, md: 5}} >
+            <Grid sx={{ xs: 12, md: 6 }}>
               <Box sx={{ mb: 3 }}>
                 <Typography
                   variant="subtitle2"
-                  color="text.secondary"
+                  color="primary.main"
                   gutterBottom
                 >
                   Username
                 </Typography>
-                <Typography>@{safeUser.username}</Typography>
+                <Typography>{safeUser.username}</Typography>
               </Box>
 
               <Box sx={{ mb: 3 }}>
                 <Typography
                   variant="subtitle2"
-                  color="text.secondary"
+                  color="primary.main"
                   gutterBottom
                 >
                   Member Since
@@ -446,6 +451,22 @@ export default function WallPage() {
           onClose={() => setCreateDialogOpen(false)}
           onSubmit={handleCreatePost}
           isLoading={createPostMutation.isPending}
+        />
+      )}
+
+      {/* Edit Profile Dialog */}
+      {isOwnWall && (
+        <EditProfileDialog
+          open={editProfileOpen}
+          onClose={() => setEditProfileOpen(false)}
+          user={{
+            id: safeUser.id,
+            username: safeUser.username,
+            displayName: safeUser.displayName,
+            bio: safeUser.bio,
+            email: safeUser.email,
+          }}
+          onProfileUpdated={handleProfileUpdated}
         />
       )}
     </Container>

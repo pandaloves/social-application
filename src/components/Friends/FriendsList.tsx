@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Box,
   List,
@@ -13,11 +13,6 @@ import {
   Alert,
   Chip,
   IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
 } from "@mui/material";
 import {
   Person as PersonIcon,
@@ -30,6 +25,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { friendshipService } from "@/src/services/api";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useRouter } from "next/navigation";
+import SendFriendRequestDialog from "../SendFriendRequestDialog";
 
 interface FriendsListProps {
   userId: number;
@@ -37,11 +33,15 @@ interface FriendsListProps {
 }
 
 export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
-  const { user: currentUser } = useAuth();
+  const {
+    user: currentUser,
+    sendRequestOpen,
+    setSendRequestOpen,
+    friendUsername,
+    setFriendUsername,
+  } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [sendRequestOpen, setSendRequestOpen] = useState(false);
-  const [friendUsername, setFriendUsername] = useState("");
 
   // Debug: Log to see what's happening
   useEffect(() => {
@@ -80,7 +80,7 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
 
     // Check which user is NOT the profile owner
     if (friendship.requester?.id === userId) {
-      return friendship.addressee || friendship.receiver; // Use addressee (from your backend)
+      return friendship.addressee || friendship.receiver;
     } else {
       return friendship.requester;
     }
@@ -92,7 +92,7 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
   };
 
   // Safe filter for pending requests where current user is the receiver/addressee
-  const pendingRequests = React.useMemo(() => {
+  const pendingRequests = useMemo(() => {
     if (!Array.isArray(friendships)) return [];
     return friendships.filter((f: any) => {
       const receiver = getReceiver(f);
@@ -101,16 +101,16 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
   }, [friendships, currentUser]);
 
   // Safe filter for sent requests where current user is the requester
-  const sentRequests = React.useMemo(() => {
+  const sentRequests = useMemo(() => {
     if (!Array.isArray(friendships)) return [];
     return friendships.filter(
       (f: any) =>
-        f?.status === "PENDING" && f?.requester?.id === currentUser?.id
+        f?.status === "PENDING" && f?.requester?.id === currentUser?.id,
     );
   }, [friendships, currentUser]);
 
   // Safe filter for accepted friends
-  const acceptedFriends = React.useMemo(() => {
+  const acceptedFriends = useMemo(() => {
     if (!Array.isArray(friendships)) return [];
     return friendships.filter((f: any) => f?.status === "ACCEPTED");
   }, [friendships]);
@@ -119,8 +119,8 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
   const sendRequestMutation = useMutation({
     mutationFn: (targetUserId: number) =>
       friendshipService.createFriendship({
-        requesterId: currentUser?.id || 0,
-        receiverId: targetUserId,
+        requesterUserId: currentUser?.id || 0,
+        addresseeUserId: targetUserId,
         status: "PENDING",
       }),
     onSuccess: () => {
@@ -174,7 +174,7 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
             startIcon={<PersonAddIcon />}
             onClick={() => setSendRequestOpen(true)}
           >
-            Add Friend
+            Send Friend Request
           </Button>
         </Box>
       )}
@@ -312,11 +312,11 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
                     },
                   }}
                   onClick={() =>
-                    friend.username && router.push(`/wall/${friend.username}`)
+                    friend.username && router.push(`/wall/${friend.id}`)
                   }
                   secondaryAction={
                     isOwnWall ? (
-                      <IconButton edge="end">
+                      <IconButton edge="end" sx={{ color: "primary.main" }}>
                         <ChatIcon />
                       </IconButton>
                     ) : null
@@ -347,43 +347,19 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
         ) : (
           <Alert severity="info">
             {isOwnWall
-              ? "You haven't added any friends yet. Use the 'Add Friend' button to connect with others!"
+              ? "You haven't added any friends yet. Use the 'Send Friend Request' button to connect with others!"
               : "This user hasn't added any friends yet."}
           </Alert>
         )}
       </Box>
 
       {/* Send Friend Request Dialog */}
-      <Dialog open={sendRequestOpen} onClose={() => setSendRequestOpen(false)}>
-        <DialogTitle>Send Friend Request</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Friend's Username"
-            type="text"
-            fullWidth
-            variant="outlined"
-            value={friendUsername}
-            onChange={(e) => setFriendUsername(e.target.value)}
-            placeholder="Enter username (without @)"
-          />
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
-            Enter the username of the person you want to add as a friend
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSendRequestOpen(false)}>Cancel</Button>
-          <Button
-            onClick={() => {
-              setSendRequestOpen(false);
-            }}
-            variant="contained"
-          >
-            Send Request
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <SendFriendRequestDialog
+        sendRequestOpen={sendRequestOpen}
+        setSendRequestOpen={setSendRequestOpen}
+        friendUsername={friendUsername}
+        setFriendUsername={setFriendUsername}
+      />
     </Box>
   );
 }

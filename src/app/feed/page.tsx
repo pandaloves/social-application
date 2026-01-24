@@ -1,29 +1,67 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Container,
   Box,
   Typography,
   CircularProgress,
+  Snackbar,
   Alert,
   AlertTitle,
   Fab,
+  Button,
 } from "@mui/material";
-import { Add as AddIcon } from "@mui/icons-material";
+import {
+  Add as AddIcon,
+  PersonAdd as PersonAddIcon,
+} from "@mui/icons-material";
+import MuiAlert from "@mui/material/Alert";
+
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import api, { postService } from "@/src/services/api";
 import PostCard from "@/src/components/Post/PostCard";
+import { friendshipService } from "@/src/services/api";
 import CreatePostDialog from "@/src/components/Post/CreatePostDialog";
-import { PostResponseDto } from "@/src/types";
+import { FriendshipResponseDto, PostResponseDto } from "@/src/types";
 import { useAuth } from "@/src/contexts/AuthContext";
+import { userService } from "@/src/services/api";
 
 export default function FeedPage() {
-  const { user, isAuthenticated } = useAuth();
+  const {
+    user,
+    isAuthenticated,
+    sendRequestOpen,
+    setSendRequestOpen,
+    friendUsername,
+    setFriendUsername,
+  } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+
+  const { data: friends = [] } = useQuery<FriendshipResponseDto[]>({
+    queryKey: ["friends", user?.id],
+    queryFn: () => userService.getFriends(user!.id),
+    enabled: !!user?.id,
+  });
+
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: "success" | "error" | "info" | "warning";
+  }>({
+    open: false,
+    message: "",
+    severity: "success",
+  });
+
+  const isFriend = (authorId: number) => {
+    if (!friends || !authorId) return false;
+
+    return friends.some((friend) => friend.id === authorId);
+  };
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -61,6 +99,38 @@ export default function FeedPage() {
 
   // Extract posts from postsData (which should now be an array)
   const posts = postsData || [];
+
+  const addFriendMutation = useMutation({
+    mutationFn: (receiverId: number) =>
+      friendshipService.createFriendship({
+        requesterUserId: user!.id,
+        addresseeUserId: receiverId,
+      }),
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["friends"] });
+
+      setSnackbar({
+        open: true,
+        message: "Friend request sent successfully!",
+        severity: "success",
+      });
+    },
+
+    onError: () => {
+      setSnackbar({
+        open: true,
+        message: "Failed to send friend request",
+        severity: "error",
+      });
+    },
+  });
+
+  const handleAddFriend = (receiverId: number) => {
+    if (!user?.id) return;
+
+    addFriendMutation.mutate(receiverId);
+  };
 
   // Create post mutation
   const createPostMutation = useMutation({
@@ -135,6 +205,8 @@ export default function FeedPage() {
     );
   }
 
+  console.log("Friends:", friends);
+
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>
@@ -164,7 +236,9 @@ export default function FeedPage() {
             onEdit={handleEditPost}
             onDelete={handleDeletePost}
             onComment={handleComment}
-            showActions={user?.id === post.author.id} // Show edit/delete only for own posts
+            onAddFriend={handleAddFriend}
+            showActions={user?.id === post.author.id}
+            isFriend={isFriend(post.author.id)}
           />
         ))}
 
@@ -189,6 +263,22 @@ export default function FeedPage() {
         onSubmit={handleCreatePost}
         isLoading={createPostMutation.isPending}
       />
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <MuiAlert
+          elevation={6}
+          variant="filled"
+          severity={snackbar.severity}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+        >
+          {snackbar.message}
+        </MuiAlert>
+      </Snackbar>
     </Container>
   );
 }

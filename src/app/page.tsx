@@ -106,7 +106,12 @@ export default function HomePage() {
           >
             <Box sx={{ textAlign: "center", mb: 3 }}>
               <FeedIcon sx={{ fontSize: 48, color: "primary.main", mb: 2 }} />
-              <Typography variant="h5" gutterBottom fontWeight="bold">
+              <Typography
+                variant="h5"
+                gutterBottom
+                fontWeight="bold"
+                sx={{ color: "white" }}
+              >
                 Feed
               </Typography>
             </Box>
