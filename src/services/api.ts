@@ -112,35 +112,43 @@ export const userService = {
 
 // Post Service
 export const postService = {
-getPosts: async (params?: { page?: number; size?: number; sort?: string }) => {
+ getPosts: async (params?: { page?: number; size?: number; sort?: string; userId?: number }) => {
+    try {
+      const response = await api.get('/posts', {
+        params: {
+          page: params?.page ?? 0,
+          size: params?.size ?? 50,
+          sort: params?.sort ?? 'createdAt,desc',
+          // If you want to filter by user for wall pages, add userId param
+          userId: params?.userId
+        }
+      });
 
-  let userId;
+      console.log("API Response for getPosts:", {
+        hasContent: !!response.data?.content,
+        isArray: Array.isArray(response.data),
+        dataType: typeof response.data
+      });
+      
+      // Always return an array for consistency
+      if (response.data?.content) {
+        return response.data.content;
+      }
 
-  // Read authenticated user
-  if (typeof window !== 'undefined') {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      const user = JSON.parse(storedUser);
-      userId = user?.id;
+      if (Array.isArray(response.data)) {
+        return response.data;
+      }
+
+      if (response.data && typeof response.data === 'object') {
+        return [response.data];
+      }
+
+      return [];
+    } catch (error) {
+      console.error("Error in getPosts:", error);
+      throw error;
     }
-  }
-
-  const response = await api.get('/posts', {
-    params: {
-      userId: userId,             
-      page: params?.page ?? 0,
-      size: params?.size ?? 10,
-      sort: params?.sort ?? 'createdAt,desc'
-    }
-  });
-
-  // Spring Page response handling
-  if (response.data?.content) {
-    return response.data.content;
-  }
-
-  return response.data;
-},
+  },
 
   getPostsWithPagination: async (params?: { page?: number; size?: number; sort?: string }) => {
     const response = await api.get('/posts', { params });

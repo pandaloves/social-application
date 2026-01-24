@@ -47,7 +47,9 @@ export default function PostCard({
   onAddFriend,
   showActions = true,
   isFriend = false,
-}: PostCardProps) {
+  isPending = false, // Added missing prop
+}: PostCardProps & { isPending?: boolean }) {
+  // Added type extension
   const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
@@ -200,25 +202,32 @@ export default function PostCard({
                 </Menu>
               </>
             ) : (
-              post.author.id !== user?.id &&
-              (isFriend ? (
-                <Button
-                  size="small"
-                  variant="outlined"
-                  style={{ color: "green" }}
-                >
-                  Friend ✓
-                </Button>
-              ) : (
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<PersonAddIcon />}
-                  onClick={() => onAddFriend?.(post.author.id)}
-                >
-                  Send Friend Request
-                </Button>
-              ))
+              post.author.id !== user?.id && (
+                <>
+                  {isFriend ? (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      style={{ color: "green" }}
+                    >
+                      Friend ✓
+                    </Button>
+                  ) : isPending ? (
+                    <Button size="small" variant="outlined" disabled>
+                      Request Pending
+                    </Button>
+                  ) : (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<PersonAddIcon />}
+                      onClick={() => onAddFriend?.(post.author.id)}
+                    >
+                      Send Friend Request
+                    </Button>
+                  )}
+                </>
+              )
             )
           }
         />

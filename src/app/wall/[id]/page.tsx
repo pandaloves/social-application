@@ -16,6 +16,7 @@ import {
   Chip,
   Tabs,
   Tab,
+  Snackbar,
 } from "@mui/material";
 import {
   Person as PersonIcon,
@@ -23,6 +24,7 @@ import {
   Add as AddIcon,
   ArrowBack as ArrowBackIcon,
 } from "@mui/icons-material";
+import MuiAlert from "@mui/material/Alert";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api, { postService, userService } from "@/src/services/api";
 import PostCard from "@/src/components/Post/PostCard";
@@ -41,6 +43,15 @@ export default function WallPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [tabValue, setTabValue] = useState(0);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: "success" | "error" | "info" | "warning";
+  }>({
+    open: false,
+    message: "",
+    severity: "success",
+  });
 
   // Check if this is the current user's wall
   const isOwnWall = currentUser?.id === id;
@@ -77,27 +88,29 @@ export default function WallPage() {
     enabled: !!id && isAuthenticated,
   });
 
-  // Fetch posts for this user
+  // Fetch posts for this user - FIXED to use proper query
   const {
     data: postsData = [],
     isLoading: postsLoading,
     error: postsError,
     refetch: refetchPosts,
   } = useQuery({
-    queryKey: ["user-posts", id],
+    queryKey: ["posts", "user", id], // Consistent query key
     queryFn: async () => {
       try {
-        // Get all posts
-        const allPosts = await postService.getPosts();
-        console.log("All the auth posts:", allPosts);
+        // Use postService.getPosts with user filter if available, or filter manually
+        const allPosts = await postService.getPosts({
+          page: 0,
+          size: 50,
+          sort: "createdAt,desc",
+        });
 
-        // Filter posts by author
+        // Filter posts by author if API doesn't support filtering by user
         const userPosts = Array.isArray(allPosts)
           ? allPosts.filter((post: any) => post.author?.id === id)
-          : allPosts?.content?.filter((post: any) => post.author?.id === id) ||
-            [];
+          : [];
 
-        console.log("User posts:", userPosts);
+        console.log("User posts for wall:", userPosts.length);
         return userPosts;
       } catch (error) {
         console.error("Error fetching posts:", error);
@@ -107,36 +120,170 @@ export default function WallPage() {
     enabled: !!id && !!userData && isAuthenticated,
   });
 
-  // Create post mutation
+  // Create post mutation - UPDATED to update both caches
   const createPostMutation = useMutation({
     mutationFn: (content: string) =>
       postService.createPost({
         content,
         userId: currentUser?.id || 0,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user-posts", id] });
+    onMutate: async (content) => {
+      // Cancel outgoing queries
+      await queryClient.cancelQueries({ queryKey: ["posts", "user", id] });
+      await queryClient.cancelQueries({ queryKey: ["posts", "feed"] });
+
+      // Snapshot previous values
+      const previousWallPosts =
+        queryClient.getQueryData(["posts", "user", id]) || [];
+      const previousFeedPosts =
+        queryClient.getQueryData(["posts", "feed"]) || [];
+
+      // Create optimistic post
+      const optimisticPost = {
+        id: Date.now(), // Temporary ID
+        content,
+        author: currentUser,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        comments: [],
+      };
+
+      // Optimistically update wall posts
+      queryClient.setQueryData(["posts", "user", id], (oldData: any[] = []) => {
+        console.log("Optimistically adding post to wall");
+        return [optimisticPost, ...oldData];
+      });
+
+      // Optimistically update feed posts
+      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
+        console.log("Optimistically adding post to feed");
+        return [optimisticPost, ...oldData];
+      });
+
+      return { previousWallPosts, previousFeedPosts };
+    },
+    onSuccess: (newPost) => {
+      console.log("Post created successfully:", newPost);
+
+      // Replace optimistic posts with real ones in wall
+      queryClient.setQueryData(["posts", "user", id], (oldData: any[] = []) => {
+        const filtered = oldData.filter((post) => post.id !== Date.now());
+        return [newPost, ...filtered];
+      });
+
+      // Replace optimistic posts with real ones in feed
+      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
+        const filtered = oldData.filter((post) => post.id !== Date.now());
+        return [newPost, ...filtered];
+      });
+
+      // Invalidate both queries to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ["posts", "user", id] });
+      queryClient.invalidateQueries({ queryKey: ["posts", "feed"] });
+
       setCreateDialogOpen(false);
+      setSnackbar({
+        open: true,
+        message: "Post created successfully!",
+        severity: "success",
+      });
+    },
+    onError: (error, content, context) => {
+      console.error("Error creating post:", error);
+
+      // Rollback to previous values
+      if (context?.previousWallPosts) {
+        queryClient.setQueryData(
+          ["posts", "user", id],
+          context.previousWallPosts,
+        );
+      }
+
+      if (context?.previousFeedPosts) {
+        queryClient.setQueryData(["posts", "feed"], context.previousFeedPosts);
+      }
+
+      setSnackbar({
+        open: true,
+        message: "Failed to create post",
+        severity: "error",
+      });
     },
   });
 
-  // Update post mutation
+  // Update post mutation - UPDATED to update both caches
   const updatePostMutation = useMutation({
     mutationFn: ({ id, content }: { id: number; content: string }) =>
       postService.updatePost(id, {
         content,
         userId: currentUser?.id || 0,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user-posts", id] });
+    onSuccess: (updatedPost) => {
+      // Update post in wall
+      queryClient.setQueryData(["posts", "user", id], (oldData: any[] = []) => {
+        return oldData.map((post) =>
+          post.id === updatedPost.id ? updatedPost : post,
+        );
+      });
+
+      // Update post in feed
+      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
+        return oldData.map((post) =>
+          post.id === updatedPost.id ? updatedPost : post,
+        );
+      });
+
+      // Invalidate both
+      queryClient.invalidateQueries({ queryKey: ["posts", "user", id] });
+      queryClient.invalidateQueries({ queryKey: ["posts", "feed"] });
     },
   });
 
-  // Delete post mutation
+  // Delete post mutation - UPDATED to update both caches
   const deletePostMutation = useMutation({
-    mutationFn: (id: number) => postService.deletePost(id),
+    mutationFn: (postId: number) => postService.deletePost(postId),
+    onMutate: async (postId) => {
+      // Cancel outgoing queries
+      await queryClient.cancelQueries({ queryKey: ["posts", "user", id] });
+      await queryClient.cancelQueries({ queryKey: ["posts", "feed"] });
+
+      // Snapshot previous values
+      const previousWallPosts =
+        queryClient.getQueryData(["posts", "user", id]) || [];
+      const previousFeedPosts =
+        queryClient.getQueryData(["posts", "feed"]) || [];
+
+      // Optimistically remove from wall
+      queryClient.setQueryData(["posts", "user", id], (oldData: any[] = []) => {
+        return oldData.filter((post) => post.id !== postId);
+      });
+
+      // Optimistically remove from feed
+      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
+        return oldData.filter((post) => post.id !== postId);
+      });
+
+      return { previousWallPosts, previousFeedPosts };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user-posts", id] });
+      // Invalidate both queries
+      queryClient.invalidateQueries({ queryKey: ["posts", "user", id] });
+      queryClient.invalidateQueries({ queryKey: ["posts", "feed"] });
+    },
+    onError: (error, postId, context) => {
+      console.error("Error deleting post:", error);
+
+      // Rollback to previous values
+      if (context?.previousWallPosts) {
+        queryClient.setQueryData(
+          ["posts", "user", id],
+          context.previousWallPosts,
+        );
+      }
+
+      if (context?.previousFeedPosts) {
+        queryClient.setQueryData(["posts", "feed"], context.previousFeedPosts);
+      }
     },
   });
 
@@ -144,12 +291,14 @@ export default function WallPage() {
     createPostMutation.mutate(content);
   };
 
-  const handleEditPost = (id: number, content: string) => {
-    updatePostMutation.mutate({ id, content });
+  const handleEditPost = (postId: number, content: string) => {
+    updatePostMutation.mutate({ id: postId, content });
   };
 
-  const handleDeletePost = (id: number) => {
-    deletePostMutation.mutate(id);
+  const handleDeletePost = (postId: number) => {
+    if (window.confirm("Are you sure you want to delete this post?")) {
+      deletePostMutation.mutate(postId);
+    }
   };
 
   const handleBackToFeed = () => {
@@ -228,7 +377,6 @@ export default function WallPage() {
     displayName: userData?.displayName || userData?.username || "User",
     email: userData?.email || "",
     bio: userData?.bio || "",
-    // Add createdAt if available
     createdAt: userData?.createdAt || new Date().toISOString(),
   };
 
@@ -469,6 +617,23 @@ export default function WallPage() {
           onProfileUpdated={handleProfileUpdated}
         />
       )}
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <MuiAlert
+          elevation={6}
+          variant="filled"
+          severity={snackbar.severity}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+        >
+          {snackbar.message}
+        </MuiAlert>
+      </Snackbar>
     </Container>
   );
 }
