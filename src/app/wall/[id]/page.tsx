@@ -265,7 +265,8 @@ export default function WallPage() {
   });
 
   // Update post mutation
-  // Update post mutation - FIXED error handling
+  // Replace the updatePostMutation in WallPage with this:
+
   const updatePostMutation = useMutation({
     mutationFn: ({ id: postId, content }: { id: number; content: string }) =>
       postService.updatePost(postId, {
@@ -277,10 +278,16 @@ export default function WallPage() {
       await queryClient.cancelQueries({ queryKey: ["posts", "user", id] });
       await queryClient.cancelQueries({ queryKey: ["posts", "feed"] });
 
-      // Snapshot previous values
-      const previousWallData = queryClient.getQueryData<PostsPaginatedResponse>(
-        ["posts", "user", id, page, PAGE_SIZE],
-      ) || {
+      // Get current data with safe defaults
+      const currentWallData = queryClient.getQueryData<PostsPaginatedResponse>([
+        "posts",
+        "user",
+        id,
+        page,
+        PAGE_SIZE,
+      ]);
+
+      const previousWallData = currentWallData || {
         content: [],
         totalElements: 0,
         totalPages: 0,
@@ -290,39 +297,30 @@ export default function WallPage() {
         last: true,
       };
 
-      const previousFeedData = queryClient.getQueryData<PostsPaginatedResponse>(
-        ["posts", "feed", 0],
-      ) || {
-        content: [],
-        totalElements: 0,
-        totalPages: 0,
-        number: 0,
-        size: PAGE_SIZE,
-        first: true,
-        last: true,
-      };
-
-      // Find the post to update
-      const postToUpdate = previousWallData.content.find(
+      // Find the post to update - SAFER VERSION
+      const postToUpdate = currentWallData?.content?.find(
         (post: PostResponseDto) => post.id === postId,
       );
 
       if (!postToUpdate) {
-        throw new Error("Post not found in cache");
+        console.warn("Post not found in cache for update:", postId);
+        return { previousWallData, postId, content };
       }
 
-      // Create optimistic updated post - FIX: Don't overwrite createdAt
+      // Create optimistic updated post
       const optimisticUpdatedPost: PostResponseDto = {
         ...postToUpdate,
         content,
-        createdAt: new Date().toISOString(), // Only update updatedAt, keep createdAt
+        createdAt: new Date().toISOString(),
       };
 
-      // Optimistically update in wall
+      // Optimistically update in wall - SAFER VERSION
       queryClient.setQueryData<PostsPaginatedResponse>(
         ["posts", "user", id, page, PAGE_SIZE],
         (oldData) => {
-          if (!oldData) return oldData;
+          if (!oldData || !Array.isArray(oldData.content)) {
+            return oldData;
+          }
 
           return {
             ...oldData,
@@ -333,37 +331,7 @@ export default function WallPage() {
         },
       );
 
-      // Optimistically update in feed (first page)
-      queryClient.setQueryData<PostsPaginatedResponse>(
-        ["posts", "feed", 0],
-        (oldData) => {
-          if (!oldData) return oldData;
-
-          return {
-            ...oldData,
-            content: oldData.content.map((post: PostResponseDto) =>
-              post.id === postId ? optimisticUpdatedPost : post,
-            ),
-          };
-        },
-      );
-
-      // Also update in feed for all pages (not just page 0)
-      queryClient.setQueriesData<PostsPaginatedResponse>(
-        { queryKey: ["posts", "feed"] },
-        (oldData) => {
-          if (!oldData) return oldData;
-
-          return {
-            ...oldData,
-            content: oldData.content.map((post: PostResponseDto) =>
-              post.id === postId ? optimisticUpdatedPost : post,
-            ),
-          };
-        },
-      );
-
-      return { previousWallData, previousFeedData, optimisticUpdatedPost };
+      return { previousWallData, postId, content, optimisticUpdatedPost };
     },
     onSuccess: (updatedPost, variables, context) => {
       console.log("Post updated successfully:", updatedPost);
@@ -375,43 +343,14 @@ export default function WallPage() {
         severity: "success",
       });
 
-      // Replace optimistic update with real data in wall
-      queryClient.setQueryData<PostsPaginatedResponse>(
-        ["posts", "user", id, page, PAGE_SIZE],
-        (oldData) => {
-          if (!oldData || !oldData.content) return oldData;
-
-          return {
-            ...oldData,
-            content: oldData.content.map((post: PostResponseDto) =>
-              post.id === updatedPost.id ? updatedPost : post,
-            ),
-          };
-        },
-      );
-
-      // Replace optimistic update with real data in feed (first page)
-      queryClient.setQueryData<PostsPaginatedResponse>(
-        ["posts", "feed", 0],
-        (oldData) => {
-          if (!oldData || !oldData.content) return oldData;
-
-          return {
-            ...oldData,
-            content: oldData.content.map((post: PostResponseDto) =>
-              post.id === updatedPost.id ? updatedPost : post,
-            ),
-          };
-        },
-      );
-
-      // Also update other pages if they exist
-      for (let i = 1; i < 10; i++) {
-        // Adjust the range as needed
+      // Replace optimistic update with real data
+      if (context?.optimisticUpdatedPost) {
         queryClient.setQueryData<PostsPaginatedResponse>(
-          ["posts", "feed", i],
+          ["posts", "user", id, page, PAGE_SIZE],
           (oldData) => {
-            if (!oldData || !oldData.content) return oldData;
+            if (!oldData || !Array.isArray(oldData.content)) {
+              return oldData;
+            }
 
             return {
               ...oldData,
@@ -423,50 +362,13 @@ export default function WallPage() {
         );
       }
 
-      // Invalidate queries to ensure fresh data (but don't show error if invalidation fails)
-      setTimeout(() => {
-        queryClient
-          .invalidateQueries({ queryKey: ["posts", "user", id] })
-          .catch(console.error);
-        queryClient
-          .invalidateQueries({ queryKey: ["posts", "feed"] })
-          .catch(console.error);
-      }, 100);
+      // Invalidate queries to ensure fresh data
+      queryClient.invalidateQueries({
+        queryKey: ["posts", "user", id],
+      });
     },
     onError: (error: any, variables, context) => {
       console.error("Error updating post:", error);
-
-      // Check if it's an Axios error
-      const isAxiosError = error.isAxiosError;
-      const response = error.response;
-      const status = response?.status;
-      const data = response?.data;
-
-      if (isAxiosError) {
-        // It's an Axios error, we can access response
-        const errorMessage =
-          data?.message || error.message || "Failed to update post";
-
-        if (status && status >= 400) {
-          setSnackbar({
-            open: true,
-            message: errorMessage,
-            severity: "error",
-          });
-        } else if (!response) {
-          // Network error
-          console.log(
-            "Network error during update, post may still be updated on server",
-          );
-        }
-      } else {
-        // Regular JavaScript error
-        setSnackbar({
-          open: true,
-          message: error.message || "Failed to update post",
-          severity: "error",
-        });
-      }
 
       // Rollback to previous values
       if (context?.previousWallData) {
@@ -476,12 +378,20 @@ export default function WallPage() {
         );
       }
 
-      if (context?.previousFeedData) {
-        queryClient.setQueryData(
-          ["posts", "feed", 0],
-          context.previousFeedData,
-        );
+      // Show error message
+      let errorMessage = "Failed to update post";
+
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
       }
+
+      setSnackbar({
+        open: true,
+        message: errorMessage,
+        severity: "error",
+      });
     },
   });
 
@@ -493,10 +403,16 @@ export default function WallPage() {
       await queryClient.cancelQueries({ queryKey: ["posts", "user", id] });
       await queryClient.cancelQueries({ queryKey: ["posts", "feed"] });
 
-      // Snapshot previous values with proper typing
-      const previousWallData = queryClient.getQueryData<PostsPaginatedResponse>(
-        ["posts", "user", id, page, PAGE_SIZE],
-      ) || {
+      // Get current cached data
+      const currentWallData = queryClient.getQueryData<PostsPaginatedResponse>([
+        "posts",
+        "user",
+        id,
+        page,
+        PAGE_SIZE,
+      ]);
+
+      const previousWallData = currentWallData || {
         content: [],
         totalElements: 0,
         totalPages: 0,
@@ -506,69 +422,57 @@ export default function WallPage() {
         last: true,
       };
 
-      const previousFeedData = queryClient.getQueryData<PostsPaginatedResponse>(
-        ["posts", "feed", 0],
-      ) || {
-        content: [],
-        totalElements: 0,
-        totalPages: 0,
-        number: 0,
-        size: PAGE_SIZE,
-        first: true,
-        last: true,
-      };
-
-      // Optimistically remove from wall
+      // Optimistically remove from wall - MORE ROBUST VERSION
       queryClient.setQueryData<PostsPaginatedResponse>(
         ["posts", "user", id, page, PAGE_SIZE],
         (oldData) => {
-          if (!oldData) return oldData;
+          if (!oldData || !Array.isArray(oldData.content)) {
+            return oldData;
+          }
+
+          const newContent = oldData.content.filter(
+            (post: PostResponseDto) => post.id !== postId,
+          );
 
           return {
             ...oldData,
-            content: oldData.content.filter(
-              (post: PostResponseDto) => post.id !== postId,
-            ),
-            totalElements: oldData.totalElements - 1,
+            content: newContent,
+            totalElements: newContent.length,
           };
         },
       );
 
-      // Optimistically remove from feed (first page)
-      queryClient.setQueryData<PostsPaginatedResponse>(
-        ["posts", "feed", 0],
-        (oldData) => {
-          if (!oldData) return oldData;
+      // Also remove from feed cache (all pages)
+      const feedKeys = queryClient.getQueryCache().findAll({
+        queryKey: ["posts", "feed"],
+      });
 
-          return {
-            ...oldData,
-            content: oldData.content.filter(
+      feedKeys.forEach((query) => {
+        queryClient.setQueryData<PostsPaginatedResponse>(
+          query.queryKey,
+          (oldData) => {
+            if (!oldData || !Array.isArray(oldData.content)) {
+              return oldData;
+            }
+
+            const newContent = oldData.content.filter(
               (post: PostResponseDto) => post.id !== postId,
-            ),
-            totalElements: oldData.totalElements - 1,
-          };
-        },
-      );
+            );
 
-      // Also remove from all other pages of feed
-      queryClient.setQueriesData<PostsPaginatedResponse>(
-        { queryKey: ["posts", "feed"] },
-        (oldData) => {
-          if (!oldData) return oldData;
+            return {
+              ...oldData,
+              content: newContent,
+              totalElements: newContent.length,
+            };
+          },
+        );
+      });
 
-          return {
-            ...oldData,
-            content: oldData.content.filter(
-              (post: PostResponseDto) => post.id !== postId,
-            ),
-            totalElements: oldData.totalElements - 1,
-          };
-        },
-      );
-
-      return { previousWallData, previousFeedData };
+      return { previousWallData };
     },
-    onSuccess: () => {
+    onSuccess: (_, postId) => {
+      console.log("Post deleted successfully:", postId);
+
       // Show success message
       setSnackbar({
         open: true,
@@ -576,14 +480,15 @@ export default function WallPage() {
         severity: "success",
       });
 
-      // Invalidate both queries to ensure fresh data
-      queryClient.invalidateQueries({ queryKey: ["posts", "user", id] });
-      queryClient.invalidateQueries({ queryKey: ["posts", "feed"] });
+      // Instead of invalidating everything, just refetch the current page
+      queryClient.refetchQueries({
+        queryKey: ["posts", "user", id, page, PAGE_SIZE],
+      });
     },
     onError: (error, postId, context) => {
       console.error("Error deleting post:", error);
 
-      // Rollback to previous values
+      // Rollback wall data
       if (context?.previousWallData) {
         queryClient.setQueryData(
           ["posts", "user", id, page, PAGE_SIZE],
@@ -591,16 +496,15 @@ export default function WallPage() {
         );
       }
 
-      if (context?.previousFeedData) {
-        queryClient.setQueryData(
-          ["posts", "feed", 0],
-          context.previousFeedData,
-        );
-      }
+      // Show error message with more details
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to delete post. Please try again.";
 
       setSnackbar({
         open: true,
-        message: "Failed to delete post",
+        message: errorMessage,
         severity: "error",
       });
     },
