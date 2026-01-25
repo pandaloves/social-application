@@ -4,10 +4,20 @@ export type LoginRequest ={
   password: string;
 }
 
-export type LoginResponse = {
+export interface LoginResponse {
   token: string;
   refreshToken: string;
   success: boolean;
+  user?: UserResponseDto;
+}
+
+export type RefreshTokenRequest ={
+  refreshToken: string;
+}
+
+export type RefreshTokenResponse ={
+  token: string;
+  refreshToken?: string;
 }
 
 // User Types
@@ -153,7 +163,7 @@ export type PostCardProps = {
    onAddFriend?: (userId: number) => void;
   showActions?: boolean;
   isFriend?: boolean;
- isPending?: boolean;
+  isPending?: boolean;
 };
 
 
@@ -267,3 +277,16 @@ export type MutationOptions<TVariables = any> = {
   onError?: (error: any, variables: TVariables) => void;
   onSettled?: (data: any, error: any, variables: TVariables) => void;
 }
+
+
+export interface PaginatedResponse<T> {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
+  number: number; 
+  size: number;
+  first: boolean;
+  last: boolean;
+}
+
+export type PostsPaginatedResponse = PaginatedResponse<PostResponseDto>;

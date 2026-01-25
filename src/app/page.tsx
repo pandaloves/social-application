@@ -29,11 +29,17 @@ export default function HomePage() {
   }
 
   return (
-    <Container maxWidth="lg">
-      {/* Hero Section */}
+    <Container
+      maxWidth="lg"
+      sx={{
+        minHeight: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+      }}
+    >
       <Box
         sx={{
-          my: { xs: 6, md: 10 },
           textAlign: "center",
           px: { xs: 2, md: 0 },
         }}
@@ -87,128 +93,6 @@ export default function HomePage() {
             </Button>
           </Link>
         </Box>
-      </Box>
-
-      {/* Features Section */}
-      <Grid container spacing={4} sx={{ mb: 10 }}>
-        <Grid sx={{ xs: 12, md: 4 }}>
-          <Paper
-            sx={{
-              p: 4,
-              height: "100%",
-              borderRadius: 3,
-              transition: "transform 0.2s",
-              "&:hover": {
-                transform: "translateY(-4px)",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-              },
-            }}
-          >
-            <Box sx={{ textAlign: "center", mb: 3 }}>
-              <FeedIcon sx={{ fontSize: 48, color: "primary.main", mb: 2 }} />
-              <Typography
-                variant="h5"
-                gutterBottom
-                fontWeight="bold"
-                sx={{ color: "white" }}
-              >
-                Feed
-              </Typography>
-            </Box>
-            <Typography align="center">
-              Browse through posts from all users in chronological order. Stay
-              updated with what's happening in your network.
-            </Typography>
-          </Paper>
-        </Grid>
-
-        <Grid sx={{ xs: 12, md: 4 }}>
-          <Paper
-            sx={{
-              p: 4,
-              height: "100%",
-              borderRadius: 3,
-              transition: "transform 0.2s",
-              "&:hover": {
-                transform: "translateY(-4px)",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-              },
-            }}
-          >
-            <Box sx={{ textAlign: "center", mb: 3 }}>
-              <PersonIcon sx={{ fontSize: 48, color: "primary.main", mb: 2 }} />
-              <Typography variant="h5" gutterBottom fontWeight="bold">
-                Personal Wall
-              </Typography>
-            </Box>
-            <Typography align="center">
-              Your personal space to share thoughts, create posts, and manage
-              your content. Express yourself freely!
-            </Typography>
-          </Paper>
-        </Grid>
-
-        <Grid sx={{ xs: 12, md: 4 }}>
-          <Paper
-            sx={{
-              p: 4,
-              height: "100%",
-              borderRadius: 3,
-              transition: "transform 0.2s",
-              "&:hover": {
-                transform: "translateY(-4px)",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-              },
-            }}
-          >
-            <Box sx={{ textAlign: "center", mb: 3 }}>
-              <GroupIcon sx={{ fontSize: 48, color: "primary.main", mb: 2 }} />
-              <Typography variant="h5" gutterBottom fontWeight="bold">
-                Friends & Connections
-              </Typography>
-            </Box>
-            <Typography align="center">
-              Connect with friends, send friend requests, and build your social
-              network. Grow your community!
-            </Typography>
-          </Paper>
-        </Grid>
-      </Grid>
-
-      {/* Call to Action */}
-      <Box
-        sx={{
-          bgcolor: "primary.main",
-          color: "white",
-          p: 6,
-          borderRadius: 3,
-          textAlign: "center",
-          mb: 8,
-        }}
-      >
-        <Typography variant="h4" gutterBottom fontWeight="bold">
-          Ready to Join Our Community?
-        </Typography>
-        <Typography variant="h6" sx={{ mb: 4, opacity: 0.9 }}>
-          Sign up now and start connecting with amazing people
-        </Typography>
-        <Link href="/register" passHref>
-          <Button
-            variant="contained"
-            size="large"
-            sx={{
-              bgcolor: "white",
-              color: "primary.main",
-              "&:hover": {
-                bgcolor: "grey.100",
-              },
-              px: 5,
-              py: 1.5,
-            }}
-          >
-            Create Free Account
-          </Button>
-        </Link>
       </Box>
     </Container>
   );

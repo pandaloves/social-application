@@ -17,7 +17,7 @@ import {
   PersonAdd as PersonAddIcon,
 } from "@mui/icons-material";
 import MuiAlert from "@mui/material/Alert";
-
+import { ArrowBack, ArrowForward } from "@mui/icons-material";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import api, { postService } from "@/src/services/api";
@@ -26,7 +26,7 @@ import { friendshipService } from "@/src/services/api";
 import CreatePostDialog from "@/src/components/Post/CreatePostDialog";
 import { FriendshipResponseDto, PostResponseDto } from "@/src/types";
 import { useAuth } from "@/src/contexts/AuthContext";
-import { userService } from "@/src/services/api";
+import { PostsPaginatedResponse } from "@/src/types";
 
 export default function FeedPage() {
   const {
@@ -40,6 +40,8 @@ export default function FeedPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [page, setPage] = useState(0);
+  const pageSize = 10;
 
   // Fetch friendships instead of just friends
   const { data: friendships = [] } = useQuery<FriendshipResponseDto[]>({
@@ -96,29 +98,24 @@ export default function FeedPage() {
   }, [isAuthenticated, router]);
 
   // Fetch posts - FIXED: Use the same query key pattern as WallPage
-  const {
-    data: posts = [],
-    isLoading,
-    error,
-  } = useQuery({
-    queryKey: ["posts", "feed"],
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["posts", "feed", page],
     queryFn: async () => {
-      try {
-        console.log("Fetching feed posts...");
-        const postsData = await postService.getPosts({
-          page: 0,
-          size: 50,
-          sort: "createdAt,desc",
-        });
-        console.log("Feed posts fetched:", postsData?.length || 0, "posts");
-        return Array.isArray(postsData) ? postsData : [];
-      } catch (error) {
-        console.error("Error fetching feed posts:", error);
-        return [];
-      }
+      const response = await postService.getPostsWithPagination({
+        page,
+        size: pageSize,
+        sort: "createdAt,desc",
+      });
+
+      return response;
     },
+    placeholderData: (previousData) => previousData,
     enabled: isAuthenticated,
   });
+
+  const posts: PostResponseDto[] = data?.content || [];
+  const totalPages = data?.totalPages || 0;
+  const currentPage = data?.number || 0;
 
   const addFriendMutation = useMutation({
     mutationFn: (receiverId: number) =>
@@ -274,6 +271,7 @@ export default function FeedPage() {
         message: "Post created successfully!",
         severity: "success",
       });
+      setPage(0);
     },
     onError: (error, content, context) => {
       console.error("Error creating post from FeedPage:", error);
@@ -295,24 +293,111 @@ export default function FeedPage() {
   const updatePostMutation = useMutation({
     mutationFn: ({ id, content }: { id: number; content: string }) =>
       postService.updatePost(id, { content, userId: user?.id || 0 }),
-    onSuccess: (updatedPost) => {
-      // Update post in feed
-      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
-        return oldData.map((post) =>
-          post.id === updatedPost.id ? updatedPost : post,
-        );
-      });
+    onMutate: async ({ id: postId, content }) => {
+      // Cancel all related queries
+      await queryClient.cancelQueries({ queryKey: ["posts", "feed"] });
+      await queryClient.cancelQueries({ queryKey: ["posts", "user"] });
 
-      // Also update in user's wall if needed
-      if (user?.id && updatedPost.author?.id === user.id) {
-        queryClient.setQueryData(
-          ["posts", "user", user.id],
-          (oldData: any[] = []) => {
-            return oldData.map((post) =>
-              post.id === updatedPost.id ? updatedPost : post,
-            );
+      // Snapshot previous values
+      const previousFeedData = queryClient.getQueryData<PostsPaginatedResponse>(
+        ["posts", "feed", page],
+      ) || {
+        content: [],
+        totalElements: 0,
+        totalPages: 0,
+        number: page,
+        size: pageSize,
+        first: true,
+        last: true,
+      };
+
+      // Find the post to get its author
+      const postToUpdate = previousFeedData.content.find(
+        (post: PostResponseDto) => post.id === postId,
+      );
+      const authorId = postToUpdate?.author?.id;
+
+      // Create optimistic updated post
+      const optimisticUpdatedPost: PostResponseDto = {
+        ...postToUpdate!,
+        content,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Optimistically update in feed
+      queryClient.setQueryData<PostsPaginatedResponse>(
+        ["posts", "feed", page],
+        (oldData) => {
+          if (!oldData) return oldData;
+
+          return {
+            ...oldData,
+            content: oldData.content.map((post: PostResponseDto) =>
+              post.id === postId ? optimisticUpdatedPost : post,
+            ),
+          };
+        },
+      );
+
+      // Also update in author's wall if we know the author
+      if (authorId) {
+        // Update in all pages of author's wall
+        queryClient.setQueriesData<PostsPaginatedResponse>(
+          { queryKey: ["posts", "user", authorId] },
+          (oldData) => {
+            if (!oldData) return oldData;
+
+            return {
+              ...oldData,
+              content: oldData.content.map((post: PostResponseDto) =>
+                post.id === postId ? optimisticUpdatedPost : post,
+              ),
+            };
           },
         );
+      }
+
+      return { previousFeedData, authorId, optimisticUpdatedPost };
+    },
+    onSuccess: (updatedPost) => {
+      // Replace optimistic update with real data
+      queryClient.setQueryData<PostsPaginatedResponse>(
+        ["posts", "feed", page],
+        (oldData) => {
+          if (!oldData) return oldData;
+
+          return {
+            ...oldData,
+            content: oldData.content.map((post: PostResponseDto) =>
+              post.id === updatedPost.id ? updatedPost : post,
+            ),
+          };
+        },
+      );
+
+      // Also update in author's wall
+      if (updatedPost.author?.id) {
+        queryClient.setQueriesData<PostsPaginatedResponse>(
+          { queryKey: ["posts", "user", updatedPost.author.id] },
+          (oldData) => {
+            if (!oldData) return oldData;
+
+            return {
+              ...oldData,
+              content: oldData.content.map((post: PostResponseDto) =>
+                post.id === updatedPost.id ? updatedPost : post,
+              ),
+            };
+          },
+        );
+      }
+
+      // Invalidate queries to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ["posts", "feed"] });
+      if (updatedPost.author?.id) {
+        queryClient.invalidateQueries({
+          queryKey: ["posts", "user", updatedPost.author.id],
+        });
       }
 
       setSnackbar({
@@ -321,50 +406,125 @@ export default function FeedPage() {
         severity: "success",
       });
     },
-  });
+    onError: (error, variables, context) => {
+      console.error("Error updating post:", error);
 
-  // Delete post mutation
-  const deletePostMutation = useMutation({
-    mutationFn: (id: number) => postService.deletePost(id),
-    onMutate: async (postId) => {
-      // Cancel outgoing queries
-      await queryClient.cancelQueries({ queryKey: ["posts", "feed"] });
-
-      // Snapshot previous value
-      const previousFeedPosts =
-        queryClient.getQueryData(["posts", "feed"]) || [];
-
-      // Optimistically remove from feed
-      queryClient.setQueryData(["posts", "feed"], (oldData: any[] = []) => {
-        return oldData.filter((post) => post.id !== postId);
-      });
-
-      return { previousFeedPosts };
-    },
-    onSuccess: (_, postId) => {
-      // Also remove from user's wall if needed
-      if (user?.id) {
+      // Rollback feed posts
+      if (context?.previousFeedData) {
         queryClient.setQueryData(
-          ["posts", "user", user.id],
-          (oldData: any[] = []) => {
-            return oldData.filter((post) => post.id !== postId);
-          },
+          ["posts", "feed", page],
+          context.previousFeedData,
         );
       }
 
       setSnackbar({
         open: true,
+        message: "Failed to update post",
+        severity: "error",
+      });
+    },
+  });
+
+  // Delete post mutation
+  const deletePostMutation = useMutation({
+    mutationFn: (postId: number) => postService.deletePost(postId),
+    onMutate: async (postId) => {
+      // Cancel all related queries
+      await queryClient.cancelQueries({ queryKey: ["posts", "feed"] });
+      await queryClient.cancelQueries({ queryKey: ["posts", "user"] });
+
+      // Snapshot previous values with proper typing
+      const previousFeedData = queryClient.getQueryData<PostsPaginatedResponse>(
+        ["posts", "feed", page],
+      ) || {
+        content: [],
+        totalElements: 0,
+        totalPages: 0,
+        number: page,
+        size: pageSize,
+        first: true,
+        last: true,
+      };
+
+      // Find the post to get its author
+      const postToDelete = previousFeedData.content?.find(
+        (post: PostResponseDto) => post.id === postId,
+      );
+      const authorId = postToDelete?.author?.id;
+
+      // Optimistically remove from feed (handle paginated format)
+      queryClient.setQueryData<PostsPaginatedResponse>(
+        ["posts", "feed", page],
+        (oldData) => {
+          if (!oldData) return oldData;
+
+          const newContent = oldData.content.filter(
+            (post: PostResponseDto) => post.id !== postId,
+          );
+
+          return {
+            ...oldData,
+            content: newContent,
+            totalElements: oldData.totalElements - 1,
+          };
+        },
+      );
+
+      // Also remove from author's wall if we know the author
+      if (authorId) {
+        // Remove from all pages of author's wall
+        queryClient.setQueriesData<PostsPaginatedResponse>(
+          { queryKey: ["posts", "user", authorId] },
+          (oldData) => {
+            if (!oldData) return oldData;
+
+            const newContent = oldData.content.filter(
+              (post: PostResponseDto) => post.id !== postId,
+            );
+
+            return {
+              ...oldData,
+              content: newContent,
+              totalElements: oldData.totalElements - 1,
+            };
+          },
+        );
+      }
+
+      return { previousFeedData, authorId };
+    },
+    onSuccess: (_, postId, context) => {
+      // Show success message
+      setSnackbar({
+        open: true,
         message: "Post deleted successfully!",
         severity: "success",
       });
+
+      // Invalidate queries to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ["posts", "feed"] });
+      if (context?.authorId) {
+        queryClient.invalidateQueries({
+          queryKey: ["posts", "user", context.authorId],
+        });
+      }
     },
     onError: (error, postId, context) => {
       console.error("Error deleting post:", error);
 
-      // Rollback to previous value
-      if (context?.previousFeedPosts) {
-        queryClient.setQueryData(["posts", "feed"], context.previousFeedPosts);
+      // Rollback feed posts
+      if (context?.previousFeedData) {
+        queryClient.setQueryData(
+          ["posts", "feed", page],
+          context.previousFeedData,
+        );
       }
+
+      setSnackbar({
+        open: true,
+        message: "Failed to delete post",
+        severity: "error",
+      });
     },
   });
 
@@ -448,8 +608,41 @@ export default function FeedPage() {
             onAddFriend={handleAddFriend}
             showActions={user?.id === post.author.id}
             isFriend={isFriend(post.author.id)}
+            isPending={isRequestPending(post.author.id)}
           />
         ))}
+
+      {totalPages > 1 && (
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            gap: 2,
+            mt: 4,
+          }}
+        >
+          <Button
+            startIcon={<ArrowBack />}
+            disabled={currentPage === 0}
+            onClick={() => setPage((prev) => prev - 1)}
+          >
+            Prev
+          </Button>
+
+          <Typography variant="body1">
+            Page {currentPage + 1} of {totalPages}
+          </Typography>
+
+          <Button
+            endIcon={<ArrowForward />}
+            disabled={currentPage + 1 >= totalPages}
+            onClick={() => setPage((prev) => prev + 1)}
+          >
+            Next
+          </Button>
+        </Box>
+      )}
 
       {/* Create Post FAB */}
       <Fab
