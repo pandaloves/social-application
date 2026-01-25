@@ -212,8 +212,30 @@ export const userService = {
     return response.data;
   },
   
-  deleteUser: async (id: number) => {
-    await api.delete(`/users/${id}`);
+ deleteUser: async (id: number) => {
+    // Get current user from localStorage to verify ownership
+    if (typeof window !== 'undefined') {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const currentUser = JSON.parse(storedUser);
+        
+        // Check if the current user is trying to delete their own account
+        if (currentUser.id !== id) {
+          throw new Error('You can only delete your own account');
+        }
+      }
+    }
+    
+    const response = await api.delete(`/users/${id}`);
+    
+    // Clear storage after successful deletion
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('user');
+    }
+    
+    return response.data;
   },
   
   createPostForUser: async (userId: number, postData: PostRequestDto) => {
