@@ -25,21 +25,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { friendshipService } from "@/src/services/api";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useRouter } from "next/navigation";
-import SendFriendRequestDialog from "../SendFriendRequestDialog";
 
-interface FriendsListProps {
+type FriendsListProps = {
   userId: number;
   isOwnWall: boolean;
-}
+};
 
 export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
-  const {
-    user: currentUser,
-    sendRequestOpen,
-    setSendRequestOpen,
-    friendUsername,
-    setFriendUsername,
-  } = useAuth();
+  const { user: currentUser, friendUsername, setFriendUsername } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -88,7 +81,7 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
 
   // Helper to get receiver/addressee
   const getReceiver = (friendship: any) => {
-    return friendship.addressee || friendship.receiver; // Prefer addressee
+    return friendship.addressee || friendship.receiver;
   };
 
   // Safe filter for pending requests where current user is the receiver/addressee
@@ -119,14 +112,95 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
   const sendRequestMutation = useMutation({
     mutationFn: (targetUserId: number) =>
       friendshipService.createFriendship({
-        requesterUserId: currentUser?.id || 0,
+        requesterUserId: currentUser!.id,
         addresseeUserId: targetUserId,
         status: "PENDING",
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["friendships", userId] });
-      setSendRequestOpen(false);
+
+    onMutate: async (targetUserId) => {
+      const senderId = currentUser!.id;
+
+      await queryClient.cancelQueries({ queryKey: ["friendships", senderId] });
+      await queryClient.cancelQueries({
+        queryKey: ["friendships", targetUserId],
+      });
+
+      const prevSender = queryClient.getQueryData<any[]>([
+        "friendships",
+        senderId,
+      ]);
+
+      const prevReceiver = queryClient.getQueryData<any[]>([
+        "friendships",
+        targetUserId,
+      ]);
+
+      const tempId = Date.now(); // MUST be number (your UI expects number)
+
+      const optimisticRequest = {
+        id: tempId,
+        requester: currentUser,
+        addressee: { id: targetUserId },
+        status: "PENDING",
+        __optimistic: true,
+      };
+
+      // Sender cache → Sent Requests
+      queryClient.setQueryData(["friendships", senderId], (old: any[] = []) => [
+        optimisticRequest,
+        ...old,
+      ]);
+
+      // Receiver cache → Incoming Requests
+      queryClient.setQueryData(
+        ["friendships", targetUserId],
+        (old: any[] = []) => [optimisticRequest, ...old],
+      );
+
+      return {
+        prevSender,
+        prevReceiver,
+        senderId,
+        receiverId: targetUserId,
+        tempId,
+      };
+    },
+
+    onError: (_, __, ctx) => {
+      if (!ctx) return;
+
+      queryClient.setQueryData(["friendships", ctx.senderId], ctx.prevSender);
+
+      queryClient.setQueryData(
+        ["friendships", ctx.receiverId],
+        ctx.prevReceiver,
+      );
+    },
+
+    onSuccess: (newFriendship, _, ctx) => {
+      if (!ctx) return;
+
+      const replaceOptimistic = (old: any[] = []) =>
+        old.map((f) => (f.id === ctx.tempId ? newFriendship : f));
+
+      queryClient.setQueryData(
+        ["friendships", ctx.senderId],
+        replaceOptimistic,
+      );
+
+      queryClient.setQueryData(
+        ["friendships", ctx.receiverId],
+        replaceOptimistic,
+      );
+
       setFriendUsername("");
+    },
+
+    onSettled: (_, __, ___) => {
+      // Safety net: always sync with backend
+      queryClient.invalidateQueries({
+        queryKey: ["friendships", currentUser!.id],
+      });
     },
   });
 
@@ -186,19 +260,6 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
 
   return (
     <Box>
-      {/* Action buttons for own wall */}
-      {isOwnWall && (
-        <Box sx={{ mb: 3, display: "flex", gap: 2 }}>
-          <Button
-            variant="contained"
-            startIcon={<PersonAddIcon />}
-            onClick={() => setSendRequestOpen(true)}
-          >
-            Send Friend Request
-          </Button>
-        </Box>
-      )}
-
       {/* Pending requests (only shown to current user) */}
       {isOwnWall && pendingRequests.length > 0 && (
         <Box sx={{ mb: 3 }}>
@@ -309,7 +370,7 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
       {/* Accepted friends */}
       <Box>
         <Typography variant="h6" gutterBottom>
-          Friends ({acceptedFriends.length})
+          Current Friends ({acceptedFriends.length})
         </Typography>
 
         {acceptedFriends.length > 0 ? (
@@ -372,14 +433,6 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
           </Alert>
         )}
       </Box>
-
-      {/* Send Friend Request Dialog */}
-      <SendFriendRequestDialog
-        sendRequestOpen={sendRequestOpen}
-        setSendRequestOpen={setSendRequestOpen}
-        friendUsername={friendUsername}
-        setFriendUsername={setFriendUsername}
-      />
     </Box>
   );
 }

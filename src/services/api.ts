@@ -5,7 +5,9 @@ import type {
   PostRequestDto,
   CommentRequestDto,
   FriendshipRequestDto,
-  UserResponseDto
+  UserResponseDto,
+  RefreshTokenRequest,
+  RefreshTokenResponse
 } from '../types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -16,6 +18,21 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Track if a refresh is in progress
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (value: any) => void; reject: (reason?: any) => void }> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
 
 // Request interceptor to add token
 api.interceptors.request.use(
@@ -31,40 +48,136 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle errors
+// Response interceptor to handle errors and refresh token
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      // Handle unauthorized access
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
+    const originalRequest = error.config;
+
+    // If error is 401 and we haven't tried to refresh yet
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        // If refresh is already in progress, wait for it
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then(token => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return api(originalRequest);
+          })
+          .catch(err => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        const refreshToken = localStorage.getItem('refreshToken');
+        if (!refreshToken) {
+          throw new Error('No refresh token available');
+        }
+
+        // Call refresh token endpoint
+        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+          refreshToken,
+        });
+
+        const { token, refreshToken: newRefreshToken } = response.data;
+
+        // Store new tokens
+        localStorage.setItem('token', token);
+        if (newRefreshToken) {
+          localStorage.setItem('refreshToken', newRefreshToken);
+        }
+
+        // Update authorization header
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+        // Process queued requests
+        processQueue(null, token);
+
+        // Retry original request
+        originalRequest.headers.Authorization = `Bearer ${token}`;
+        return api(originalRequest);
+      } catch (refreshError) {
+        // If refresh fails, logout user
+        processQueue(refreshError, null);
+        
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('token');
+          localStorage.removeItem('refreshToken');
+          localStorage.removeItem('user');
+          window.location.href = '/login';
+        }
+        
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
       }
     }
+
+    // For other errors, just reject
     return Promise.reject(error);
   }
 );
 
-// Auth Service
+// Auth Service - UPDATED to handle refresh token
 export const authService = {
   login: async (credentials: LoginRequest) => {
     const response = await api.post('/users/login', credentials);
+    
+    // Store both tokens
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('token', response.data.token);
+      if (response.data.refreshToken) {
+        localStorage.setItem('refreshToken', response.data.refreshToken);
+      }
+    }
+    
     return response.data;
   },
   
   register: async (userData: UserRequestDto) => {
     const response = await api.post('/users/', userData);
+    
+    // Store both tokens after registration if provided
+    if (response.data.token && typeof window !== 'undefined') {
+      localStorage.setItem('token', response.data.token);
+      if (response.data.refreshToken) {
+        localStorage.setItem('refreshToken', response.data.refreshToken);
+      }
+    }
+    
     return response.data;
   },
   
   logout: () => {
     if (typeof window !== 'undefined') {
+      // Optionally call logout endpoint to invalidate tokens
+      const refreshToken = localStorage.getItem('refreshToken');
+      if (refreshToken) {
+        // Call logout endpoint if your backend has one
+        // api.post('/auth/logout', { refreshToken }).catch(console.error);
+      }
+      
       localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
     }
+  },
+  
+  refreshToken: async (refreshToken: string): Promise<RefreshTokenResponse> => {
+    const response = await api.post('/auth/refresh', { refreshToken });
+    
+    // Store new tokens
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('token', response.data.token);
+      if (response.data.refreshToken) {
+        localStorage.setItem('refreshToken', response.data.refreshToken);
+      }
+    }
+    
+    return response.data;
   },
   
   getCurrentUser: (): UserResponseDto | null => {
@@ -76,7 +189,7 @@ export const authService = {
   },
 };
 
-// User Service
+// User Service - UPDATED to handle token refresh automatically
 export const userService = {
   getUsers: async () => {
     const response = await api.get('/users');
@@ -90,8 +203,12 @@ export const userService = {
   
   updateUser: async (id: number, userData: UserRequestDto) => {
     const response = await api.put(`/users/${id}`, userData);
-    localStorage.setItem('user', JSON.stringify(response.data));
- 
+    
+    // Update stored user data
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('user', JSON.stringify(response.data));
+    }
+    
     return response.data;
   },
   
@@ -104,50 +221,24 @@ export const userService = {
     return response.data;
   },
   
+  // This should now work with token refresh
   getFriends: async (id: number) => {
     const response = await api.get(`/users/${id}/friends`);
+    return response.data;
+  },
+  
+  // Alternative: Get friends via friendships endpoint
+  getFriendsViaFriendships: async (id: number) => {
+    const response = await api.get(`/friendships/${id}/friends`);
     return response.data;
   },
 };
 
 // Post Service
 export const postService = {
- getPosts: async (params?: { page?: number; size?: number; sort?: string; userId?: number }) => {
-    try {
-      const response = await api.get('/posts', {
-        params: {
-          page: params?.page ?? 0,
-          size: params?.size ?? 50,
-          sort: params?.sort ?? 'createdAt,desc',
-          // If you want to filter by user for wall pages, add userId param
-          userId: params?.userId
-        }
-      });
-
-      console.log("API Response for getPosts:", {
-        hasContent: !!response.data?.content,
-        isArray: Array.isArray(response.data),
-        dataType: typeof response.data
-      });
-      
-      // Always return an array for consistency
-      if (response.data?.content) {
-        return response.data.content;
-      }
-
-      if (Array.isArray(response.data)) {
-        return response.data;
-      }
-
-      if (response.data && typeof response.data === 'object') {
-        return [response.data];
-      }
-
-      return [];
-    } catch (error) {
-      console.error("Error in getPosts:", error);
-      throw error;
-    }
+ getAuthUserPostsPagination: async (params?: { userId: number;page?: number; size?: number; sort?: string }) => {
+    const response = await api.get('/posts', { params });
+    return response.data;
   },
 
   getPostsWithPagination: async (params?: { page?: number; size?: number; sort?: string }) => {
@@ -188,7 +279,7 @@ export const commentService = {
   },
 };
 
-// Friendship Service
+// Friendship Service (no changes needed)
 export const friendshipService = {
   getFriendships: async (userId: number) => {
     const response = await api.get(`/friendships/${userId}`);
@@ -199,7 +290,6 @@ export const friendshipService = {
     const response = await api.post('/friendships', friendshipData);
     return response.data;
   },
-  
   
   acceptFriendship: async (id: number) => {
     const response = await api.put(`/friendships/${id}/accept`);
@@ -212,7 +302,7 @@ export const friendshipService = {
   },
 };
 
-// Export convenience functions with proper typing
+// Export convenience functions
 export const fetchComments = (postId: number) => commentService.getComments(postId);
 export const createComment = (postId: number, commentData: CommentRequestDto) => 
   commentService.createComment(postId, commentData);
@@ -221,10 +311,9 @@ export const createComment = (postId: number, commentData: CommentRequestDto) =>
 export const login = (credentials: LoginRequest) => authService.login(credentials);
 export const register = (userData: UserRequestDto) => authService.register(userData);
 export const logout = () => authService.logout();
+export const refreshToken = (refreshToken: string) => authService.refreshToken(refreshToken);
 export const getCurrentUser = () => authService.getCurrentUser();
 export const fetchUserProfile = (userId: number) => userService.getUserById(userId);
-export const fetchFeedPosts = (params?: { page?: number; size?: number; sort?: string }) => 
-  postService.getPosts(params);
 export const fetchFriends = (userId: number) => userService.getFriends(userId);
 
 export default api;
