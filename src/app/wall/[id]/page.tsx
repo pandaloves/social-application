@@ -379,7 +379,7 @@ export default function WallPage() {
       queryClient.setQueryData<PostsPaginatedResponse>(
         ["posts", "user", id, page, PAGE_SIZE],
         (oldData) => {
-          if (!oldData) return oldData;
+          if (!oldData || !oldData.content) return oldData;
 
           return {
             ...oldData,
@@ -394,7 +394,7 @@ export default function WallPage() {
       queryClient.setQueryData<PostsPaginatedResponse>(
         ["posts", "feed", 0],
         (oldData) => {
-          if (!oldData) return oldData;
+          if (!oldData || !oldData.content) return oldData;
 
           return {
             ...oldData,
@@ -405,20 +405,23 @@ export default function WallPage() {
         },
       );
 
-      // Replace optimistic update with real data in all feed pages
-      queryClient.setQueriesData<PostsPaginatedResponse>(
-        { queryKey: ["posts", "feed"] },
-        (oldData) => {
-          if (!oldData) return oldData;
+      // Also update other pages if they exist
+      for (let i = 1; i < 10; i++) {
+        // Adjust the range as needed
+        queryClient.setQueryData<PostsPaginatedResponse>(
+          ["posts", "feed", i],
+          (oldData) => {
+            if (!oldData || !oldData.content) return oldData;
 
-          return {
-            ...oldData,
-            content: oldData.content.map((post: PostResponseDto) =>
-              post.id === updatedPost.id ? updatedPost : post,
-            ),
-          };
-        },
-      );
+            return {
+              ...oldData,
+              content: oldData.content.map((post: PostResponseDto) =>
+                post.id === updatedPost.id ? updatedPost : post,
+              ),
+            };
+          },
+        );
+      }
 
       // Invalidate queries to ensure fresh data (but don't show error if invalidation fails)
       setTimeout(() => {

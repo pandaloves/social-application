@@ -236,7 +236,6 @@ export default function RegisterPage() {
                   endAdornment: (
                     <InputAdornment position="end">
                       <IconButton
-                        sx={{ color: "primary.main" }}
                         aria-label="toggle password visibility"
                         onClick={() =>
                           setShowConfirmPassword(!showConfirmPassword)
