@@ -153,13 +153,6 @@ export const authService = {
   
   logout: () => {
     if (typeof window !== 'undefined') {
-      // Optionally call logout endpoint to invalidate tokens
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (refreshToken) {
-        // Call logout endpoint if your backend has one
-        // api.post('/auth/logout', { refreshToken }).catch(console.error);
-      }
-      
       localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
@@ -167,7 +160,7 @@ export const authService = {
   },
   
   refreshToken: async (refreshToken: string): Promise<RefreshTokenResponse> => {
-    const response = await api.post('/auth/refresh', { refreshToken });
+    const response = await api.post('/users/refresh-token', { refreshToken });
     
     // Store new tokens
     if (typeof window !== 'undefined') {
