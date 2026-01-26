@@ -48,7 +48,6 @@ export default function AuthProvider({ children }: AuthProviderProps) {
   const [friendUsername, setFriendUsername] = useState("");
 
   useEffect(() => {
-    // Check for stored user on mount
     if (typeof window !== "undefined") {
       const storedUser = localStorage.getItem("user");
       const token = localStorage.getItem("token");
@@ -56,10 +55,8 @@ export default function AuthProvider({ children }: AuthProviderProps) {
       if (storedUser && token) {
         try {
           setUser(JSON.parse(storedUser));
-        } catch (error) {
-          console.error("Error parsing stored user:", error);
-          localStorage.removeItem("user");
-          localStorage.removeItem("token");
+        } catch {
+          localStorage.clear();
         }
       }
     }

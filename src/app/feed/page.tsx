@@ -324,7 +324,7 @@ export default function FeedPage() {
         createdAt: new Date().toISOString(),
       };
 
-      // Optimistically update in feed
+      // OPTIMISTIC UPDATE FOR FEED
       queryClient.setQueryData<PostsPaginatedResponse>(
         ["posts", "feed", page],
         (oldData) => {
@@ -339,9 +339,8 @@ export default function FeedPage() {
         },
       );
 
-      // Also update in author's wall if we know the author
+      // ALSO UPDATE WALL CACHE FOR THE AUTHOR
       if (authorId) {
-        // Update in all pages of author's wall
         queryClient.setQueriesData<PostsPaginatedResponse>(
           { queryKey: ["posts", "user", authorId] },
           (oldData) => {
@@ -360,7 +359,9 @@ export default function FeedPage() {
       return { previousFeedData, authorId, optimisticUpdatedPost };
     },
     onSuccess: (updatedPost) => {
-      // Replace optimistic update with real data
+      console.log("Post updated successfully from Feed:", updatedPost);
+
+      // REPLACE OPTIMISTIC UPDATE WITH REAL DATA IN FEED
       queryClient.setQueryData<PostsPaginatedResponse>(
         ["posts", "feed", page],
         (oldData) => {
@@ -375,7 +376,7 @@ export default function FeedPage() {
         },
       );
 
-      // Also update in author's wall
+      // ALSO UPDATE IN AUTHOR'S WALL
       if (updatedPost.author?.id) {
         queryClient.setQueriesData<PostsPaginatedResponse>(
           { queryKey: ["posts", "user", updatedPost.author.id] },
@@ -392,7 +393,7 @@ export default function FeedPage() {
         );
       }
 
-      // Invalidate queries to ensure fresh data
+      // INVALIDATE BOTH QUERIES
       queryClient.invalidateQueries({ queryKey: ["posts", "feed"] });
       if (updatedPost.author?.id) {
         queryClient.invalidateQueries({
@@ -407,7 +408,7 @@ export default function FeedPage() {
       });
     },
     onError: (error, variables, context) => {
-      console.error("Error updating post:", error);
+      console.error("Error updating post from Feed:", error);
 
       // Rollback feed posts
       if (context?.previousFeedData) {
