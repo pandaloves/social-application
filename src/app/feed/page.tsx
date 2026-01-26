@@ -98,7 +98,7 @@ export default function FeedPage() {
   }, [isAuthenticated, router]);
 
   // Fetch posts - FIXED: Use the same query key pattern as WallPage
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["posts", "feed", page],
     queryFn: async () => {
       const response = await postService.getPostsWithPagination({
@@ -580,9 +580,33 @@ export default function FeedPage() {
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Feed
-        </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: 4,
+          }}
+        >
+          <Typography variant="h4" component="h1" gutterBottom>
+            Feed
+          </Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => {
+              // Refetch posts
+              refetch();
+
+              // Refetch friendships
+              queryClient.invalidateQueries({
+                queryKey: ["friendships", user?.id],
+              });
+            }}
+          >
+            Refresh
+          </Button>
+        </Box>
         <Typography variant="body1" color="text.secondary">
           Latest posts from everyone in the community
         </Typography>
