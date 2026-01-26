@@ -47,6 +47,8 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
     data: friendships,
     isLoading,
     error,
+    refetch,
+    isFetching,
   } = useQuery({
     queryKey: ["friendships", userId],
     queryFn: () => friendshipService.getFriendships(userId),
@@ -260,6 +262,27 @@ export default function FriendsList({ userId, isOwnWall }: FriendsListProps) {
 
   return (
     <Box>
+      {/* Header + Refresh */}
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: 2,
+        }}
+      >
+        <Typography variant="h6">Friends Overview</Typography>
+
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => refetch()}
+          disabled={isFetching}
+        >
+          {isFetching ? "Refreshing..." : "Refresh"}
+        </Button>
+      </Box>
+
       {/* Pending requests (only shown to current user) */}
       {isOwnWall && pendingRequests.length > 0 && (
         <Box sx={{ mb: 3 }}>
