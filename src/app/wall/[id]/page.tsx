@@ -265,8 +265,6 @@ export default function WallPage() {
   });
 
   // Update post mutation
-  // Replace the updatePostMutation in WallPage with this:
-
   const updatePostMutation = useMutation({
     mutationFn: ({ id: postId, content }: { id: number; content: string }) =>
       postService.updatePost(postId, {
@@ -297,7 +295,7 @@ export default function WallPage() {
         last: true,
       };
 
-      // Find the post to update - SAFER VERSION
+      // Find the post to update
       const postToUpdate = currentWallData?.content?.find(
         (post: PostResponseDto) => post.id === postId,
       );
@@ -314,9 +312,26 @@ export default function WallPage() {
         createdAt: new Date().toISOString(),
       };
 
-      // Optimistically update in wall - SAFER VERSION
+      // OPTIMISTIC UPDATE FOR WALL
       queryClient.setQueryData<PostsPaginatedResponse>(
         ["posts", "user", id, page, PAGE_SIZE],
+        (oldData) => {
+          if (!oldData || !Array.isArray(oldData.content)) {
+            return oldData;
+          }
+
+          return {
+            ...oldData,
+            content: oldData.content.map((post: PostResponseDto) =>
+              post.id === postId ? optimisticUpdatedPost : post,
+            ),
+          };
+        },
+      );
+
+      // ALSO UPDATE FEED CACHE
+      queryClient.setQueriesData<PostsPaginatedResponse>(
+        { queryKey: ["posts", "feed"] },
         (oldData) => {
           if (!oldData || !Array.isArray(oldData.content)) {
             return oldData;
@@ -334,7 +349,7 @@ export default function WallPage() {
       return { previousWallData, postId, content, optimisticUpdatedPost };
     },
     onSuccess: (updatedPost, variables, context) => {
-      console.log("Post updated successfully:", updatedPost);
+      console.log("Post updated successfully from Wall:", updatedPost);
 
       // Show success message
       setSnackbar({
@@ -343,10 +358,27 @@ export default function WallPage() {
         severity: "success",
       });
 
-      // Replace optimistic update with real data
+      // Replace optimistic update with real data in WALL
       if (context?.optimisticUpdatedPost) {
         queryClient.setQueryData<PostsPaginatedResponse>(
           ["posts", "user", id, page, PAGE_SIZE],
+          (oldData) => {
+            if (!oldData || !Array.isArray(oldData.content)) {
+              return oldData;
+            }
+
+            return {
+              ...oldData,
+              content: oldData.content.map((post: PostResponseDto) =>
+                post.id === updatedPost.id ? updatedPost : post,
+              ),
+            };
+          },
+        );
+
+        // ALSO UPDATE IN FEED
+        queryClient.setQueriesData<PostsPaginatedResponse>(
+          { queryKey: ["posts", "feed"] },
           (oldData) => {
             if (!oldData || !Array.isArray(oldData.content)) {
               return oldData;
@@ -365,6 +397,9 @@ export default function WallPage() {
       // Invalidate queries to ensure fresh data
       queryClient.invalidateQueries({
         queryKey: ["posts", "user", id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["posts", "feed"],
       });
     },
     onError: (error: any, variables, context) => {
