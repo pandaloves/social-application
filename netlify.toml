@@ -1,0 +1,41 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://uniform-gerianne-mei188-cfce8101.koyeb.app/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/users/*"
+  to = "https://uniform-gerianne-mei188-cfce8101.koyeb.app/users/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/posts/*"
+  to = "https://uniform-gerianne-mei188-cfce8101.koyeb.app/posts/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/auth/*"
+  to = "https://uniform-gerianne-mei188-cfce8101.koyeb.app/auth/:splat"
+  status = 200
+  force = true
+
+# OR use a catch-all for your API (simpler):
+[[redirects]]
+  from = "/api/*"
+  to = "https://uniform-gerianne-mei188-cfce8101.koyeb.app/api/:splat"
+  status = 200
+  force = true
+
+# Add this to prevent Next.js from handling all routes
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  conditions = {Language = ["en"], Country = ["US"]}
