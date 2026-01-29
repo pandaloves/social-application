@@ -78,16 +78,12 @@ export default function WallPage() {
   } = useQuery({
     queryKey: ["user", id],
     queryFn: async () => {
-      console.log("Fetching user for id:", id);
-
       try {
         // Get all users to find the correct user
         const users = await userService.getUsers();
-        console.log("All users:", users);
 
         const foundUser = users.find((u: UserResponseDto) => u.id === id);
-        console.log("Found user:", foundUser);
-
+ 
         if (!foundUser) {
           throw new Error(`User with id ${id} not found`);
         }
@@ -110,8 +106,6 @@ export default function WallPage() {
   } = useQuery({
     queryKey: ["posts", "user", id, page, PAGE_SIZE],
     queryFn: async () => {
-      console.log("Fetching posts for user id:", id, "page:", page);
-
       // Use getAuthUserPostsPagination with authorId parameter
       const response = await postService.getAuthUserPostsPagination({
         userId: id,
