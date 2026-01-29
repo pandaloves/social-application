@@ -10,7 +10,7 @@ import type {
   RefreshTokenResponse
 } from '../types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://uniform-gerianne-mei188-cfce8101.koyeb.app';
 
 console.log('API base URL:', API_BASE_URL);
 
