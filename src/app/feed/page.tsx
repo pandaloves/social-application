@@ -574,9 +574,6 @@ export default function FeedPage() {
     );
   }
 
-  console.log("Feed posts:", posts.length);
-  console.log("Friendships for feed:", friendships.length);
-
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>

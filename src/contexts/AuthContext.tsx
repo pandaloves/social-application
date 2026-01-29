@@ -69,8 +69,6 @@ export default function AuthProvider({ children }: AuthProviderProps) {
       if (response.success) {
         localStorage.setItem("token", response.token);
         localStorage.setItem("refreshToken", response.refreshToken);
-        console.log("token", response.token);
-        console.log("refreshToken", response.refreshToken);
 
         // Fetch user by username to get full user data
         const usersResponse = await userService.getUsers();
